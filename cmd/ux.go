@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/nexus/nexus/pkg/output"
+	"github.com/nexus/nexus/internal/cli/output"
 	"github.com/spf13/cobra"
 )
 
@@ -14,29 +14,32 @@ const (
 	groupOther      = "other"
 )
 
-func exactArgs(names ...string) cobra.PositionalArgs {
+func exactArgs(hint string, names ...string) cobra.PositionalArgs {
 	return func(cmd *cobra.Command, args []string) error {
 		expected := len(names)
+		usage := cmd.UseLine()
 
 		switch {
 		case len(args) < expected:
-			missing := strings.Join(names[len(args):], ", ")
-			return validationError(
-				fmt.Sprintf("%d argument(s) required, %d provided. Missing: %s", expected, len(args), missing),
-				fmt.Sprintf("Example: %s %s", cmd.CommandPath(), strings.Join(names, " ")),
+			return validationErrorWithUsage(
+				fmt.Sprintf("Missing required arguments: %s", strings.Join(names, " ")),
+				hint,
+				usage,
 			)
 		case len(args) > expected:
-			return validationError(
+			return validationErrorWithUsage(
 				fmt.Sprintf("%d argument(s) required, %d provided. Unexpected: %s", expected, len(args), strings.Join(args[expected:], ", ")),
-				fmt.Sprintf("Use '%s --help' to see the expected arguments.", cmd.CommandPath()),
+				"",
+				usage,
 			)
 		}
 
 		for i, arg := range args {
 			if strings.TrimSpace(arg) == "" {
-				return validationError(
+				return validationErrorWithUsage(
 					fmt.Sprintf("%s cannot be empty", names[i]),
-					fmt.Sprintf("Example: %s %s", cmd.CommandPath(), strings.Join(names, " ")),
+					hint,
+					usage,
 				)
 			}
 		}
@@ -61,8 +64,13 @@ func flagErrorFunc(cmd *cobra.Command, err error) error {
 }
 
 func validationError(message, hint string) error {
+	return validationErrorWithUsage(message, hint, "")
+}
+
+func validationErrorWithUsage(message, hint, usage string) error {
 	return fmt.Errorf("%s", output.FormatValidationErrors([]*output.ValidationError{{
 		Message: message,
 		Hint:    hint,
+		Usage:   usage,
 	}}))
 }

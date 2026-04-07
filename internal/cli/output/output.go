@@ -31,6 +31,7 @@ type ValidationError struct {
 	Field   string
 	Message string
 	Hint    string
+	Usage   string
 }
 
 func (e *ValidationError) Error() string {
@@ -43,13 +44,30 @@ func FormatValidationErrors(errs []*ValidationError) string {
 		return ""
 	}
 	var sb strings.Builder
-	sb.WriteString("\n")
-	for _, e := range errs {
-		sb.WriteString(fmt.Sprintf("  ✗ %s\n", e.Message))
-		if e.Hint != "" {
-			sb.WriteString(fmt.Sprintf("    → %s\n", e.Hint))
+	for i, e := range errs {
+		if i > 0 {
+			sb.WriteString("\n")
+		}
+		sb.WriteString(fmt.Sprintf("✗ %s\n", e.Message))
+
+		switch {
+		case e.Usage != "":
+			if e.Hint != "" {
+				sb.WriteString("\nHint:\n")
+				writeIndentedBlock(&sb, e.Hint)
+			}
+
+			sb.WriteString("\nUsage:\n")
+			writeIndentedBlock(&sb, e.Usage)
+		case e.Hint != "":
+			sb.WriteString(fmt.Sprintf("→ %s\n", e.Hint))
 		}
 	}
-	sb.WriteString("\n")
 	return sb.String()
+}
+
+func writeIndentedBlock(sb *strings.Builder, value string) {
+	for _, line := range strings.Split(value, "\n") {
+		sb.WriteString(fmt.Sprintf("  %s\n", line))
+	}
 }

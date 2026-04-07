@@ -4,13 +4,15 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/nexus/nexus/internal/app"
+	"github.com/nexus/nexus/internal/cli/validator"
 	"github.com/spf13/cobra"
 )
 
 var syncCmd = &cobra.Command{
 	Use:     "sync <source> <destination>",
 	GroupID: groupCore,
-	Short: "Create a synchronization job between a source and a destination.",
+	Short: "Create a synchronization job between a source and a destination",
 	Long: `Create a synchronization job between a source and a destination.
 
 The job configuration is stored in NATS and identified by a unique token.
@@ -18,7 +20,11 @@ This token must be used with the list and workers commands to
 scan and process files.
 
 No files are transferred during this step.`,
-	Args: exactArgs("<source>", "<destination>"),
+	Args: exactArgs(
+		"Define a source directory and a destination (local path, cloud, etc.)",
+		"<source>",
+		"<destination>",
+	),
 
 	RunE: func(cmd *cobra.Command, args []string) error {
 		source := args[0]
@@ -45,6 +51,15 @@ No files are transferred during this step.`,
 }
 
 func init() {
+	v := validator.New().Add(
+		validator.ValidateEnvRequired(
+			app.NATSURLEnv,
+			"Define the NATS server URL before creating a synchronization job",
+		),
+	)
+
+	syncCmd.PreRunE = v.PreRunE()
+
 	syncCmd.Flags().String("env", "", "Target environment (e.g. production, staging)")
 	syncCmd.Flags().Duration("timeout", 30*time.Second, "Sync timeout (e.g. 30s, 2m)")
 	syncCmd.Flags().Bool("dry-run", false, "Simulate the sync without applying changes")

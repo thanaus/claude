@@ -10,12 +10,17 @@ import (
 var workerCmd = &cobra.Command{
 	Use:     "worker <token>",
 	GroupID: groupCore,
-	Short: "Run workers to process and synchronize files",
-	Long:    "Start, stop, or inspect workers associated with a service token.",
-	Example: fmt.Sprintf(`  %s worker my-service-token
-  %s worker my-service-token --env production
-  %s worker my-service-token --namespace payments --verbose`, app.Name, app.Name, app.Name),
-	Args: exactArgs("<token>"),
+	Short: "Process file events from a NATS stream and synchronize data to the destination",
+	Long: `Process file events from a NATS stream and synchronize data to the destination.
+
+Workers consume messages published by the list command, compare files
+with the destination, and transfer them if needed.
+
+Multiple workers can run in parallel to scale processing.`,
+	Args: exactArgs(
+		fmt.Sprintf("Create a sync job first to obtain a token\nRun '%s sync <source> <destination>'", app.Name),
+		"<token>",
+	),
 
 	RunE: func(cmd *cobra.Command, args []string) error {
 		token := args[0]

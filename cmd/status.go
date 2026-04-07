@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/nexus/nexus/internal/app"
-	"github.com/nexus/nexus/internal/validator"
+	"github.com/nexus/nexus/internal/cli/validator"
 	"github.com/spf13/cobra"
 )
 
@@ -17,7 +17,7 @@ var statusCmd = &cobra.Command{
 	Example: fmt.Sprintf(`  %s status my-service-token
   %s status my-service-token --output json
   %s status my-service-token --watch --verbose`, app.Name, app.Name, app.Name),
-	Args: exactArgs("<token>"),
+	Args: exactArgs("", "<token>"),
 
 	RunE: func(cmd *cobra.Command, args []string) error {
 		token := args[0]

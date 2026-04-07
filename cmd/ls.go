@@ -4,19 +4,24 @@ import (
 	"fmt"
 
 	"github.com/nexus/nexus/internal/app"
-	"github.com/nexus/nexus/internal/validator"
+	"github.com/nexus/nexus/internal/cli/validator"
 	"github.com/spf13/cobra"
 )
 
 var lsCmd = &cobra.Command{
 	Use:     "ls <token>",
 	GroupID: groupCore,
-	Short: "Scan a source and publish file metadata to a stream",
-	Long:    "List services and resources associated with an authentication token.",
-	Example: fmt.Sprintf(`  %s ls my-service-token
-  %s ls my-service-token --output json
-  %s ls my-service-token --filter api --limit 20`, app.Name, app.Name, app.Name),
-	Args: exactArgs("<token>"),
+	Short: "Scan a source and publish file metadata to a NATS stream",
+	Long: `Scan a source and publish file metadata to a NATS stream.
+
+This command reads the sync job configuration using the provided token,
+scans the source, and publishes each file as a message to a stream.
+
+Workers can then consume these messages to perform synchronization.`,
+	Args: exactArgs(
+		fmt.Sprintf("Create a sync job first to obtain a token\nRun '%s sync <source> <destination>'", app.Name),
+		"<token>",
+	),
 
 	RunE: func(cmd *cobra.Command, args []string) error {
 		token := args[0]

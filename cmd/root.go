@@ -37,7 +37,7 @@ func init() {
 	// SilenceErrors: we handle error display ourselves in Execute().
 	rootCmd.SilenceErrors = true
 	// SilenceUsage: never let Cobra print usage automatically on error.
-	// Users must explicitly run `nexus help <cmd>` or `nexus <cmd> --help`.
+	// Users must explicitly run `<app> help <cmd>` or `<app> <cmd> --help`.
 	// See docs/adr/ADR-001-silence-usage.md
 	rootCmd.SilenceUsage = true
 	rootCmd.CompletionOptions.DisableDefaultCmd = true

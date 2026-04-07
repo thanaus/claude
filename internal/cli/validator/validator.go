@@ -2,9 +2,10 @@ package validator
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
-	"github.com/nexus/nexus/pkg/output"
+	"github.com/nexus/nexus/internal/cli/output"
 	"github.com/spf13/cobra"
 )
 
@@ -81,5 +82,21 @@ func ValidateLimit() Rule {
 			}
 		}
 		return nil
+	}
+}
+
+// ValidateEnvRequired checks that an environment variable is defined.
+func ValidateEnvRequired(envVarName, hint string) Rule {
+	return func(cmd *cobra.Command, args []string) *output.ValidationError {
+		val, ok := os.LookupEnv(envVarName)
+		if ok && strings.TrimSpace(val) != "" {
+			return nil
+		}
+
+		return &output.ValidationError{
+			Message: fmt.Sprintf("Missing required environment variable: %s", envVarName),
+			Hint:    hint,
+			Usage:   cmd.UseLine(),
+		}
 	}
 }
