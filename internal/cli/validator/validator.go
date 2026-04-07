@@ -1,7 +1,9 @@
 package validator
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -165,7 +167,11 @@ func resolveExistingDir(path string) (string, os.FileInfo, error) {
 
 	resolvedPath, err := filepath.EvalSymlinks(absolutePath)
 	if err != nil {
-		resolvedPath = absolutePath
+		if errors.Is(err, fs.ErrNotExist) {
+			resolvedPath = absolutePath
+		} else {
+			return "", nil, err
+		}
 	}
 
 	info, err := os.Stat(resolvedPath)
