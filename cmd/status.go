@@ -10,7 +10,7 @@ import (
 
 var statusCmd = &cobra.Command{
 	Use:     "status <token>",
-	GroupID: groupOperations,
+	GroupID: groupMonitoring,
 	Short: "Show job and worker status",
 	Long: "Display the health and operational status of services associated " +
 		"with an authentication token.",
@@ -24,11 +24,11 @@ var statusCmd = &cobra.Command{
 
 		outputFmt, _ := cmd.Flags().GetString("output")
 		watch, _ := cmd.Flags().GetBool("watch")
-		verbose, _ := cmd.Flags().GetBool("verbose")
+		verbose, _ := cmd.Flags().GetCount("verbose")
 
-		if verbose {
-			fmt.Printf("[verbose] token=%s output=%s watch=%v\n",
-				token, outputFmt, watch)
+		if verbose >= 1 {
+			fmt.Printf("[verbose:%d] token=%s output=%s watch=%v\n",
+				verbose, token, outputFmt, watch)
 		}
 
 		if watch {

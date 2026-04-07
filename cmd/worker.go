@@ -9,7 +9,7 @@ import (
 
 var workerCmd = &cobra.Command{
 	Use:     "worker <token>",
-	GroupID: groupOperations,
+	GroupID: groupCore,
 	Short: "Run workers to process and synchronize files",
 	Long:    "Start, stop, or inspect workers associated with a service token.",
 	Example: fmt.Sprintf(`  %s worker my-service-token
@@ -22,11 +22,11 @@ var workerCmd = &cobra.Command{
 
 		env, _ := cmd.Flags().GetString("env")
 		namespace, _ := cmd.Flags().GetString("namespace")
-		verbose, _ := cmd.Flags().GetBool("verbose")
+		verbose, _ := cmd.Flags().GetCount("verbose")
 
-		if verbose {
-			fmt.Printf("[verbose] token=%s env=%s namespace=%s\n",
-				token, env, namespace)
+		if verbose >= 1 {
+			fmt.Printf("[verbose:%d] token=%s env=%s namespace=%s\n",
+				verbose, token, env, namespace)
 		}
 
 		fmt.Printf("Managing workers for token: %s\n", token)

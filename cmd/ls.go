@@ -10,7 +10,7 @@ import (
 
 var lsCmd = &cobra.Command{
 	Use:     "ls <token>",
-	GroupID: groupOperations,
+	GroupID: groupCore,
 	Short: "Scan a source and publish file metadata to a stream",
 	Long:    "List services and resources associated with an authentication token.",
 	Example: fmt.Sprintf(`  %s ls my-service-token
@@ -24,11 +24,11 @@ var lsCmd = &cobra.Command{
 		outputFmt, _ := cmd.Flags().GetString("output")
 		filter, _ := cmd.Flags().GetString("filter")
 		limit, _ := cmd.Flags().GetInt("limit")
-		verbose, _ := cmd.Flags().GetBool("verbose")
+		verbose, _ := cmd.Flags().GetCount("verbose")
 
-		if verbose {
-			fmt.Printf("[verbose] token=%s output=%s filter=%s limit=%d\n",
-				token, outputFmt, filter, limit)
+		if verbose >= 1 {
+			fmt.Printf("[verbose:%d] token=%s output=%s filter=%s limit=%d\n",
+				verbose, token, outputFmt, filter, limit)
 		}
 
 		fmt.Printf("Listing resources for token: %s\n", token)

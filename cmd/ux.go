@@ -9,8 +9,9 @@ import (
 )
 
 const (
-	groupOperations = "operations"
-	groupUtilities  = "utilities"
+	groupCore       = "core"
+	groupMonitoring = "monitoring"
+	groupOther      = "other"
 )
 
 func exactArgs(names ...string) cobra.PositionalArgs {

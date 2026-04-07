@@ -4,18 +4,20 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/nexus/nexus/internal/app"
 	"github.com/spf13/cobra"
 )
 
 var syncCmd = &cobra.Command{
 	Use:     "sync <source> <destination>",
-	GroupID: groupOperations,
-	Short: "Create a synchronization job and generate a token",
-	Long:    "Synchronize resources from a source service to a destination service.",
-	Example: fmt.Sprintf(`  %s sync service-a service-b
-  %s sync service-a service-b --env production --dry-run
-  %s sync service-a service-b --env staging --timeout 60s --verbose`, app.Name, app.Name, app.Name),
+	GroupID: groupCore,
+	Short: "Create a synchronization job between a source and a destination.",
+	Long: `Create a synchronization job between a source and a destination.
+
+The job configuration is stored in NATS and identified by a unique token.
+This token must be used with the list and workers commands to
+scan and process files.
+
+No files are transferred during this step.`,
 	Args: exactArgs("<source>", "<destination>"),
 
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -24,11 +26,11 @@ var syncCmd = &cobra.Command{
 		env, _ := cmd.Flags().GetString("env")
 		timeout, _ := cmd.Flags().GetDuration("timeout")
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
-		verbose, _ := cmd.Flags().GetBool("verbose")
+		verbose, _ := cmd.Flags().GetCount("verbose")
 
-		if verbose {
-			fmt.Printf("[verbose] source=%s destination=%s env=%s timeout=%s dry-run=%v\n",
-				source, destination, env, timeout, dryRun)
+		if verbose >= 1 {
+			fmt.Printf("[verbose:%d] source=%s destination=%s env=%s timeout=%s dry-run=%v\n",
+				verbose, source, destination, env, timeout, dryRun)
 		}
 
 		if dryRun {

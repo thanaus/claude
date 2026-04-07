@@ -32,7 +32,7 @@ func init() {
 	rootCmd.SetFlagErrorFunc(flagErrorFunc)
 
 	// Global flags (available on all subcommands).
-	rootCmd.PersistentFlags().BoolP("verbose", "v", false, "Enable verbose logging")
+	rootCmd.PersistentFlags().CountP("verbose", "v", "Increase verbosity (-v, -vv, -vvv)")
 
 	// SilenceErrors: we handle error display ourselves in Execute().
 	rootCmd.SilenceErrors = true
@@ -40,23 +40,20 @@ func init() {
 	// Users must explicitly run `nexus help <cmd>` or `nexus <cmd> --help`.
 	// See docs/adr/ADR-001-silence-usage.md
 	rootCmd.SilenceUsage = true
+	rootCmd.CompletionOptions.DisableDefaultCmd = true
 
 	rootCmd.AddGroup(&cobra.Group{
-		ID:    groupOperations,
-		Title: "Operations Commands:",
+		ID:    groupCore,
+		Title: "Core Commands:",
 	})
 	rootCmd.AddGroup(&cobra.Group{
-		ID:    groupUtilities,
-		Title: "Utility Commands:",
+		ID:    groupMonitoring,
+		Title: "Monitoring:",
+	})
+	rootCmd.AddGroup(&cobra.Group{
+		ID:    groupOther,
+		Title: "Other Commands:",
 	})
 
-	rootCmd.InitDefaultCompletionCmd()
-	for _, cmd := range rootCmd.Commands() {
-		if cmd.Name() == cobra.ShellCompRequestCmd || cmd.Name() == cobra.ShellCompNoDescRequestCmd {
-			continue
-		}
-		if cmd.Name() == "completion" {
-			cmd.GroupID = groupUtilities
-		}
-	}
+	rootCmd.SetHelpCommandGroupID(groupOther)
 }

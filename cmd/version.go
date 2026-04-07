@@ -9,7 +9,7 @@ import (
 
 var versionCmd = &cobra.Command{
 	Use:     "version",
-	GroupID: groupUtilities,
+	GroupID: groupOther,
 	Short:   fmt.Sprintf(`Show %s version`, app.DisplayName),
 	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Printf("%s %s\n", app.DisplayName, app.Version)
