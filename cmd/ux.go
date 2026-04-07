@@ -50,6 +50,8 @@ func flagErrorFunc(cmd *cobra.Command, err error) error {
 	switch {
 	case strings.Contains(msg, "unknown flag"):
 		return validationError(msg, fmt.Sprintf("Use '%s --help' to list the available flags.", cmd.CommandPath()))
+	case strings.Contains(msg, "required flag(s)"):
+		return validationError(msg, fmt.Sprintf("Use '%s --help' to see the required flags.", cmd.CommandPath()))
 	case strings.Contains(msg, "\"--timeout\""):
 		return validationError("--timeout must be a valid duration", "Example: --timeout 30s or --timeout 2m")
 	default:
