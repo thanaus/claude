@@ -9,18 +9,15 @@ import (
 )
 
 var statusCmd = &cobra.Command{
-	Use:   "status <token>",
+	Use:     "status <token>",
+	GroupID: groupOperations,
 	Short: "Show job and worker status",
-	Long: fmt.Sprintf(`Display the health and operational status of services
-associated with an authentication token.
-
-Required arguments:
-  <token>  Service authentication token
-
-Examples:
-  %s status my-service-token
+	Long: "Display the health and operational status of services associated " +
+		"with an authentication token.",
+	Example: fmt.Sprintf(`  %s status my-service-token
   %s status my-service-token --output json
   %s status my-service-token --watch --verbose`, app.Name, app.Name, app.Name),
+	Args: exactArgs("<token>"),
 
 	RunE: func(cmd *cobra.Command, args []string) error {
 		token := args[0]
@@ -48,8 +45,6 @@ Examples:
 
 func init() {
 	v := validator.New().Add(
-		validator.RequireArgs(1, []string{"<token>"}),
-		validator.ValidateToken(),
 		validator.ValidateOutputFormat(),
 	)
 

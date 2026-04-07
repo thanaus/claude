@@ -4,22 +4,18 @@ import (
 	"fmt"
 
 	"github.com/nexus/nexus/internal/app"
-	"github.com/nexus/nexus/internal/validator"
 	"github.com/spf13/cobra"
 )
 
 var workerCmd = &cobra.Command{
-	Use:   "worker <token>",
+	Use:     "worker <token>",
+	GroupID: groupOperations,
 	Short: "Run workers to process and synchronize files",
-	Long: fmt.Sprintf(`Start, stop, or inspect workers associated with a service token.
-
-Required arguments:
-  <token>  Service authentication token
-
-Examples:
-  %s worker my-service-token
+	Long:    "Start, stop, or inspect workers associated with a service token.",
+	Example: fmt.Sprintf(`  %s worker my-service-token
   %s worker my-service-token --env production
   %s worker my-service-token --namespace payments --verbose`, app.Name, app.Name, app.Name),
+	Args: exactArgs("<token>"),
 
 	RunE: func(cmd *cobra.Command, args []string) error {
 		token := args[0]
@@ -46,13 +42,6 @@ Examples:
 }
 
 func init() {
-	v := validator.New().Add(
-		validator.RequireArgs(1, []string{"<token>"}),
-		validator.ValidateToken(),
-	)
-
-	workerCmd.PreRunE = v.PreRunE()
-
 	workerCmd.Flags().String("env", "", "Target environment (e.g. production, staging)")
 	workerCmd.Flags().String("namespace", "", "Worker namespace (e.g. payments, auth)")
 

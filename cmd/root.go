@@ -1,8 +1,7 @@
 package cmd
 
 import (
-	"fmt"
-	"os"
+	"context"
 
 	"github.com/nexus/nexus/internal/app"
 	"github.com/spf13/cobra"
@@ -18,15 +17,19 @@ to synchronize data across any infrastructure.`,
 }
 
 // Execute is the entry point called by main.go.
-func Execute() {
-	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
+func Execute() error {
+	return ExecuteContext(context.Background())
+}
+
+// ExecuteContext runs the root command with a caller-provided context.
+func ExecuteContext(ctx context.Context) error {
+	return rootCmd.ExecuteContext(ctx)
 }
 
 func init() {
 	rootCmd.Version = app.Version
+	rootCmd.SuggestionsMinimumDistance = 2
+	rootCmd.SetFlagErrorFunc(flagErrorFunc)
 
 	// Global flags (available on all subcommands).
 	rootCmd.PersistentFlags().BoolP("verbose", "v", false, "Enable verbose logging")
@@ -37,4 +40,23 @@ func init() {
 	// Users must explicitly run `nexus help <cmd>` or `nexus <cmd> --help`.
 	// See docs/adr/ADR-001-silence-usage.md
 	rootCmd.SilenceUsage = true
+
+	rootCmd.AddGroup(&cobra.Group{
+		ID:    groupOperations,
+		Title: "Operations Commands:",
+	})
+	rootCmd.AddGroup(&cobra.Group{
+		ID:    groupUtilities,
+		Title: "Utility Commands:",
+	})
+
+	rootCmd.InitDefaultCompletionCmd()
+	for _, cmd := range rootCmd.Commands() {
+		if cmd.Name() == cobra.ShellCompRequestCmd || cmd.Name() == cobra.ShellCompNoDescRequestCmd {
+			continue
+		}
+		if cmd.Name() == "completion" {
+			cmd.GroupID = groupUtilities
+		}
+	}
 }

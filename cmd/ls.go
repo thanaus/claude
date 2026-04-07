@@ -9,17 +9,14 @@ import (
 )
 
 var lsCmd = &cobra.Command{
-	Use:   "ls <token>",
+	Use:     "ls <token>",
+	GroupID: groupOperations,
 	Short: "Scan a source and publish file metadata to a stream",
-	Long: fmt.Sprintf(`List services and resources associated with an authentication token.
-
-Required arguments:
-  <token>  Service authentication token
-
-Examples:
-  %s ls my-service-token
+	Long:    "List services and resources associated with an authentication token.",
+	Example: fmt.Sprintf(`  %s ls my-service-token
   %s ls my-service-token --output json
   %s ls my-service-token --filter api --limit 20`, app.Name, app.Name, app.Name),
+	Args: exactArgs("<token>"),
 
 	RunE: func(cmd *cobra.Command, args []string) error {
 		token := args[0]
@@ -48,8 +45,6 @@ Examples:
 
 func init() {
 	v := validator.New().Add(
-		validator.RequireArgs(1, []string{"<token>"}),
-		validator.ValidateToken(),
 		validator.ValidateOutputFormat(),
 		validator.ValidateLimit(),
 	)
