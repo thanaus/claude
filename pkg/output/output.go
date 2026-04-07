@@ -27,14 +27,6 @@ func (f Format) IsValid() bool {
 	return false
 }
 
-// Errorf prints a formatted error with an optional hint to stderr.
-func Errorf(field, hint string) {
-	fmt.Fprintf(os.Stderr, "\n  ✗ Error: %s\n", field)
-	if hint != "" {
-		fmt.Fprintf(os.Stderr, "    → %s\n\n", hint)
-	}
-}
-
 // ValidationError represents a validation error with a message and an optional hint.
 type ValidationError struct {
 	Field   string
