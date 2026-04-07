@@ -3,6 +3,7 @@ package validator
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/nexus/nexus/internal/cli/output"
@@ -99,4 +100,82 @@ func ValidateEnvRequired(envVarName, hint string) Rule {
 			Usage:   cmd.UseLine(),
 		}
 	}
+}
+
+// ValidateSyncPaths checks that source and destination directories exist and are distinct.
+func ValidateSyncPaths(sourceIndex, destinationIndex int) Rule {
+	return func(cmd *cobra.Command, args []string) *output.ValidationError {
+		if len(args) <= sourceIndex || len(args) <= destinationIndex {
+			return nil
+		}
+
+		sourcePath, sourceInfo, err := resolveExistingDir(args[sourceIndex])
+		if err != nil {
+			return newDirectoryValidationError(cmd, "Source", args[sourceIndex], err, "Define a valid existing source directory on the local filesystem.")
+		}
+
+		destinationPath, destinationInfo, err := resolveExistingDir(args[destinationIndex])
+		if err != nil {
+			return newDirectoryValidationError(cmd, "Destination", args[destinationIndex], err, "Define a valid existing destination directory on the local filesystem.")
+		}
+
+		if os.SameFile(sourceInfo, destinationInfo) || sourcePath == destinationPath {
+			return &output.ValidationError{
+				Message: "Source and destination must be different directories.",
+				Hint:    "Use two different directories for source and destination.",
+				Usage:   cmd.UseLine(),
+			}
+		}
+
+		return nil
+	}
+}
+
+func newDirectoryValidationError(cmd *cobra.Command, argName, path string, err error, hint string) *output.ValidationError {
+	trimmedPath := strings.TrimSpace(path)
+
+	switch {
+	case os.IsNotExist(err):
+		return &output.ValidationError{
+			Message: fmt.Sprintf("%s directory does not exist: %s", argName, trimmedPath),
+			Hint:    hint,
+			Usage:   cmd.UseLine(),
+		}
+	case err.Error() == "not a directory":
+		return &output.ValidationError{
+			Message: fmt.Sprintf("%s must be an existing directory: %s", argName, trimmedPath),
+			Hint:    hint,
+			Usage:   cmd.UseLine(),
+		}
+	default:
+		return &output.ValidationError{
+			Message: fmt.Sprintf("Cannot access %s directory: %s", argName, trimmedPath),
+			Hint:    hint,
+			Usage:   cmd.UseLine(),
+		}
+	}
+}
+
+func resolveExistingDir(path string) (string, os.FileInfo, error) {
+	cleanedPath := filepath.Clean(strings.TrimSpace(path))
+	absolutePath, err := filepath.Abs(cleanedPath)
+	if err != nil {
+		return "", nil, err
+	}
+
+	resolvedPath, err := filepath.EvalSymlinks(absolutePath)
+	if err != nil {
+		resolvedPath = absolutePath
+	}
+
+	info, err := os.Stat(resolvedPath)
+	if err != nil {
+		return "", nil, err
+	}
+
+	if !info.IsDir() {
+		return resolvedPath, info, fmt.Errorf("not a directory")
+	}
+
+	return resolvedPath, info, nil
 }

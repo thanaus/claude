@@ -22,7 +22,7 @@ func exactArgs(hint string, names ...string) cobra.PositionalArgs {
 		switch {
 		case len(args) < expected:
 			return validationErrorWithUsage(
-				fmt.Sprintf("Missing required arguments: %s", strings.Join(names, " ")),
+				fmt.Sprintf("Missing required argument(s): %s", strings.Join(names, " ")),
 				hint,
 				usage,
 			)

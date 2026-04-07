@@ -21,7 +21,7 @@ scan and process files.
 
 No files are transferred during this step.`,
 	Args: exactArgs(
-		"Define a source directory and a destination (local path, cloud, etc.)",
+		"Provide both source and destination directories.",
 		"<source>",
 		"<destination>",
 	),
@@ -56,6 +56,7 @@ func init() {
 			app.NATSURLEnv,
 			"Define the NATS server URL before creating a synchronization job",
 		),
+		validator.ValidateSyncPaths(0, 1),
 	)
 
 	syncCmd.PreRunE = v.PreRunE()
