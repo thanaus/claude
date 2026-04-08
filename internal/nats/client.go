@@ -25,28 +25,12 @@ type Client struct{}
 // Probe connects to NATS, verifies the server answers, and checks JetStream.
 func (Client) Probe(ctx context.Context, cfg config.NATSConfig) (ProbeResult, error) {
 	url := strings.TrimSpace(cfg.URL)
-	if url == "" {
-		return ProbeResult{}, fmt.Errorf("missing NATS server URL")
-	}
-
-	probeTimeout := cfg.ProbeTimeout
-	if probeTimeout <= 0 {
-		probeTimeout = defaultProbeTimeout
-	}
-
-	probeCtx := ctx
-	connectOpts := []nats.Option{}
-	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
-		var cancel context.CancelFunc
-		probeCtx, cancel = context.WithTimeout(ctx, probeTimeout)
-		defer cancel()
-
-		connectOpts = append(connectOpts, nats.Timeout(probeTimeout))
-	}
-
-	nc, err := nats.Connect(url, connectOpts...)
+	nc, probeCtx, cancel, err := connect(ctx, cfg)
 	if err != nil {
 		return ProbeResult{}, fmt.Errorf("cannot connect to NATS server %q: %w", url, err)
+	}
+	if cancel != nil {
+		defer cancel()
 	}
 	defer nc.Close()
 
@@ -75,4 +59,34 @@ func (Client) Probe(ctx context.Context, cfg config.NATSConfig) (ProbeResult, er
 	result.JetStreamReady = true
 
 	return result, nil
+}
+
+func connect(ctx context.Context, cfg config.NATSConfig) (*nats.Conn, context.Context, context.CancelFunc, error) {
+	url := strings.TrimSpace(cfg.URL)
+	if url == "" {
+		return nil, nil, nil, fmt.Errorf("missing NATS server URL")
+	}
+
+	timeout := cfg.ProbeTimeout
+	if timeout <= 0 {
+		timeout = defaultProbeTimeout
+	}
+
+	opCtx := ctx
+	var cancel context.CancelFunc
+	connectOpts := []nats.Option{}
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		opCtx, cancel = context.WithTimeout(ctx, timeout)
+		connectOpts = append(connectOpts, nats.Timeout(timeout))
+	}
+
+	nc, err := nats.Connect(url, connectOpts...)
+	if err != nil {
+		if cancel != nil {
+			cancel()
+		}
+		return nil, nil, nil, err
+	}
+
+	return nc, opCtx, cancel, nil
 }

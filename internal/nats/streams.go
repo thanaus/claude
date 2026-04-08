@@ -13,6 +13,22 @@ const (
 	statusStreamName = "SYNC_STATUS"
 )
 
+// FilesSubject returns the subject prefix used to store file events for a job.
+func FilesSubject(token string) string {
+	return fmt.Sprintf("sync.files.%s", token)
+}
+
+// StatusSubject returns the subject prefix used to store status events for a job.
+func StatusSubject(token string) string {
+	return fmt.Sprintf("sync.status.%s", token)
+}
+
+// ResourceStatus describes the provisioning status of a NATS resource.
+type ResourceStatus struct {
+	Name   string
+	Status string
+}
+
 var streamConfigs = []*nats.StreamConfig{
 	{
 		Name:      filesStreamName,
@@ -31,30 +47,33 @@ var streamConfigs = []*nats.StreamConfig{
 }
 
 // EnsureStreams creates or updates the JetStream streams required by Nexus.
-func EnsureStreams(ctx context.Context, js nats.JetStreamContext) error {
+func EnsureStreams(ctx context.Context, js nats.JetStreamContext) ([]ResourceStatus, error) {
+	statuses := make([]ResourceStatus, 0, len(streamConfigs))
 	for _, cfg := range streamConfigs {
-		if err := ensureStream(ctx, js, cfg); err != nil {
-			return err
+		status, err := ensureStream(ctx, js, cfg)
+		if err != nil {
+			return nil, err
 		}
+		statuses = append(statuses, status)
 	}
 
-	return nil
+	return statuses, nil
 }
 
-func ensureStream(ctx context.Context, js nats.JetStreamContext, cfg *nats.StreamConfig) error {
+func ensureStream(ctx context.Context, js nats.JetStreamContext, cfg *nats.StreamConfig) (ResourceStatus, error) {
 	_, err := js.StreamInfo(cfg.Name, nats.Context(ctx))
 	switch {
 	case err == nil:
 		if _, err := js.UpdateStream(cfg, nats.Context(ctx)); err != nil {
-			return fmt.Errorf("cannot update stream %q: %w", cfg.Name, err)
+			return ResourceStatus{}, fmt.Errorf("cannot update stream %q: %w", cfg.Name, err)
 		}
-		return nil
+		return ResourceStatus{Name: cfg.Name, Status: "ready"}, nil
 	case errors.Is(err, nats.ErrStreamNotFound):
 		if _, err := js.AddStream(cfg, nats.Context(ctx)); err != nil {
-			return fmt.Errorf("cannot create stream %q: %w", cfg.Name, err)
+			return ResourceStatus{}, fmt.Errorf("cannot create stream %q: %w", cfg.Name, err)
 		}
-		return nil
+		return ResourceStatus{Name: cfg.Name, Status: "created"}, nil
 	default:
-		return fmt.Errorf("cannot inspect stream %q: %w", cfg.Name, err)
+		return ResourceStatus{}, fmt.Errorf("cannot inspect stream %q: %w", cfg.Name, err)
 	}
 }

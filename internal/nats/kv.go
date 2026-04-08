@@ -1,31 +1,59 @@
 package natsclient
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/nats-io/nats.go"
 )
 
 const jobsBucketName = "sync_jobs"
 
+// SyncJob stores the metadata required to operate a synchronization job.
+type SyncJob struct {
+	Token       string    `json:"token"`
+	Source      string    `json:"source"`
+	Destination string    `json:"destination"`
+	FilesSubject string   `json:"filesSubject"`
+	StatusSubject string  `json:"statusSubject"`
+	State       string    `json:"state"`
+	CreatedAt   time.Time `json:"createdAt"`
+}
+
 // EnsureBucket creates the KV bucket required to store sync job metadata.
-func EnsureBucket(js nats.JetStreamContext) error {
-	_, err := js.KeyValue(jobsBucketName)
+func EnsureBucket(js nats.JetStreamContext) (nats.KeyValue, ResourceStatus, error) {
+	kv, err := js.KeyValue(jobsBucketName)
 	switch {
 	case err == nil:
-		return nil
+		return kv, ResourceStatus{Name: jobsBucketName, Status: "ready"}, nil
 	case errors.Is(err, nats.ErrBucketNotFound):
-		if _, err := js.CreateKeyValue(&nats.KeyValueConfig{
+		kv, err := js.CreateKeyValue(&nats.KeyValueConfig{
 			Bucket:      jobsBucketName,
 			Description: "Synchronization job metadata",
 			Storage:     nats.FileStorage,
 			Replicas:    1,
-		}); err != nil {
-			return fmt.Errorf("cannot create KV bucket %q: %w", jobsBucketName, err)
+		})
+		if err != nil {
+			return nil, ResourceStatus{}, fmt.Errorf("cannot create KV bucket %q: %w", jobsBucketName, err)
 		}
-		return nil
+		return kv, ResourceStatus{Name: jobsBucketName, Status: "created"}, nil
 	default:
-		return fmt.Errorf("cannot inspect KV bucket %q: %w", jobsBucketName, err)
+		return nil, ResourceStatus{}, fmt.Errorf("cannot inspect KV bucket %q: %w", jobsBucketName, err)
 	}
+}
+
+// SaveJob stores a sync job in the KV bucket.
+func SaveJob(kv nats.KeyValue, job SyncJob) (ResourceStatus, error) {
+	payload, err := json.Marshal(job)
+	if err != nil {
+		return ResourceStatus{}, fmt.Errorf("cannot encode sync job %q: %w", job.Token, err)
+	}
+
+	if _, err := kv.Create(job.Token, payload); err != nil {
+		return ResourceStatus{}, fmt.Errorf("cannot store sync job %q: %w", job.Token, err)
+	}
+
+	return ResourceStatus{Name: job.Token, Status: "created"}, nil
 }

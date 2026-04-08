@@ -17,7 +17,7 @@ type Deps struct {
 func NewRootCmd(deps Deps) *cobra.Command {
 	root := buildRootCmd()
 
-	root.AddCommand(NewSyncCmd(syncservice.New(deps.NATSClient, natsclient.Provisioner{})))
+	root.AddCommand(NewSyncCmd(syncservice.New(natsclient.Provisioner{})))
 	root.AddCommand(NewLSCmd())
 	root.AddCommand(NewWorkerCmd())
 	root.AddCommand(NewStatusCmd())

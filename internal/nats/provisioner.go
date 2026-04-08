@@ -2,59 +2,109 @@ package natsclient
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/nats-io/nats.go"
 	"github.com/nexus/nexus/internal/config"
 )
 
+// PrepareResult reports the NATS readiness and the resources prepared for Nexus.
+type PrepareResult struct {
+	URL            string
+	NATSReachable  bool
+	JetStreamReady bool
+	Token          string
+	Streams        []ResourceStatus
+	KeyValue       ResourceStatus
+	Job            ResourceStatus
+}
+
 // Provisioner provisions the NATS resources required by Nexus.
 type Provisioner struct{}
 
-// Provision ensures the required streams and KV bucket exist.
-func (Provisioner) Provision(ctx context.Context, cfg config.NATSConfig) error {
-	url := cfg.URL
-	if url == "" {
-		return fmt.Errorf("missing NATS server URL")
-	}
-
-	provisionTimeout := cfg.ProbeTimeout
-	if provisionTimeout <= 0 {
-		provisionTimeout = defaultProbeTimeout
-	}
-
-	provisionCtx := ctx
-	connectOpts := []nats.Option{}
-	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
-		var cancel context.CancelFunc
-		provisionCtx, cancel = context.WithTimeout(ctx, provisionTimeout)
-		defer cancel()
-
-		connectOpts = append(connectOpts, nats.Timeout(provisionTimeout))
-	}
-
-	nc, err := nats.Connect(url, connectOpts...)
+// Provision ensures the required streams and KV bucket exist and reports the outcome.
+func (Provisioner) Provision(ctx context.Context, cfg config.NATSConfig, source, destination string) (PrepareResult, error) {
+	url := strings.TrimSpace(cfg.URL)
+	nc, provisionCtx, cancel, err := connect(ctx, cfg)
 	if err != nil {
-		return fmt.Errorf("cannot connect to NATS server %q: %w", url, err)
+		return PrepareResult{}, fmt.Errorf("cannot connect to NATS server %q: %w", url, err)
+	}
+	if cancel != nil {
+		defer cancel()
 	}
 	defer nc.Close()
 
 	if err := nc.FlushWithContext(provisionCtx); err != nil {
-		return fmt.Errorf("connected to NATS server %q but the provisioning connection is not usable: %w", url, err)
+		return PrepareResult{}, fmt.Errorf("connected to NATS server %q but the provisioning connection is not usable: %w", url, err)
+	}
+
+	if !nc.IsConnected() {
+		return PrepareResult{}, fmt.Errorf("connection to NATS server %q is not ready", url)
+	}
+
+	result := PrepareResult{
+		URL:           url,
+		NATSReachable: true,
 	}
 
 	js, err := nc.JetStream()
 	if err != nil {
-		return fmt.Errorf("connected to NATS server %q but JetStream is unavailable: %w", url, err)
+		return result, fmt.Errorf("connected to NATS server %q but JetStream is unavailable: %w", url, err)
 	}
 
-	if err := EnsureStreams(provisionCtx, js); err != nil {
-		return err
+	if _, err := js.AccountInfo(nats.Context(provisionCtx)); err != nil {
+		return result, fmt.Errorf("connected to NATS server %q but JetStream is not responding: %w", url, err)
+	}
+	result.JetStreamReady = true
+
+	streams, err := EnsureStreams(provisionCtx, js)
+	if err != nil {
+		return result, err
+	}
+	result.Streams = streams
+
+	kv, bucket, err := EnsureBucket(js)
+	if err != nil {
+		return result, err
+	}
+	result.KeyValue = bucket
+
+	token, err := newToken()
+	if err != nil {
+		return result, fmt.Errorf("cannot generate sync token: %w", err)
 	}
 
-	if err := EnsureBucket(js); err != nil {
-		return err
+	job := SyncJob{
+		Token:        token,
+		Source:       source,
+		Destination:  destination,
+		FilesSubject: FilesSubject(token),
+		StatusSubject: StatusSubject(token),
+		State:        "active",
+		CreatedAt:    time.Now().UTC(),
 	}
 
-	return nil
+	jobStatus, err := SaveJob(kv, job)
+	if err != nil {
+		return result, err
+	}
+	result.Token = token
+	result.Job = jobStatus
+
+	return result, nil
+}
+
+func newToken() (string, error) {
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", err
+	}
+
+	raw[6] = (raw[6] & 0x0f) | 0x40
+	raw[8] = (raw[8] & 0x3f) | 0x80
+
+	return fmt.Sprintf("%x-%x-%x-%x-%x", raw[0:4], raw[4:6], raw[6:8], raw[8:10], raw[10:16]), nil
 }

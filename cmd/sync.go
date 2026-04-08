@@ -53,19 +53,48 @@ func newSyncRunE(svc syncservice.Service) func(*cobra.Command, []string) error {
 		})
 		if err != nil {
 			return runtimeError(
-				fmt.Sprintf("Unable to connect to NATS server: %s", os.Getenv(app.NATSURLEnv)),
-				fmt.Sprintf("Ensure the NATS server is running and reachable.\nCheck the %s environment variable.", app.NATSURLEnv),
+				fmt.Sprintf("Failed to initialize NATS resources: %s", os.Getenv(app.NATSURLEnv)),
+				fmt.Sprintf("Ensure the NATS server is running, JetStream is enabled, and reachable.\nCheck the %s environment variable.", app.NATSURLEnv),
 				err,
 			)
 		}
 
-		fmt.Printf("Syncing: %s → %s\n", source, destination)
-		fmt.Printf("NATS connection OK: %s\n", result.NATS.URL)
-		if result.NATS.JetStreamReady {
-			fmt.Println("JetStream is available.")
+		fmt.Println("✔ Sync job created")
+		fmt.Println()
+		fmt.Printf("%-14s %s\n", "Source:", source)
+		fmt.Printf("%-14s %s\n", "Destination:", destination)
+		fmt.Printf("%-14s %s\n", "Token:", result.NATS.Token)
+		fmt.Println()
+		fmt.Printf("%-14s %s\n", "NATS:", result.NATS.URL)
+		fmt.Printf("%-14s %s\n", "JetStream:", jetStreamStatus(result.NATS.JetStreamReady))
+		fmt.Println()
+		fmt.Println("Resources:")
+		for _, stream := range result.NATS.Streams {
+			fmt.Printf("  %-21s %s %s\n", "Stream "+stream.Name, "✔", resourceDisplayStatus(stream.Status))
 		}
-		fmt.Println("NATS streams and KV bucket are ready.")
+		fmt.Printf("  %-21s %s %s\n", "KV "+result.NATS.KeyValue.Name, "✔", resourceDisplayStatus(result.NATS.KeyValue.Status))
+		fmt.Println()
+		fmt.Println("Next steps:")
+		fmt.Printf("  %s ls %s\n", app.Name, result.NATS.Token)
+		fmt.Printf("  %s worker %s\n", app.Name, result.NATS.Token)
 
 		return nil
+	}
+}
+
+func jetStreamStatus(ready bool) string {
+	if ready {
+		return "enabled"
+	}
+
+	return "disabled"
+}
+
+func resourceDisplayStatus(status string) string {
+	switch status {
+	case "", "created":
+		return "ready"
+	default:
+		return status
 	}
 }
