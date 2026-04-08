@@ -4,10 +4,13 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/nats-io/nats.go"
 	"github.com/nexus/nexus/internal/config"
 )
+
+const defaultProbeTimeout = 5 * time.Second
 
 // ProbeResult reports the current NATS and JetStream readiness.
 type ProbeResult struct {
@@ -26,13 +29,28 @@ func (Client) Probe(ctx context.Context, cfg config.NATSConfig) (ProbeResult, er
 		return ProbeResult{}, fmt.Errorf("missing NATS server URL")
 	}
 
-	nc, err := nats.Connect(url)
+	probeTimeout := cfg.ProbeTimeout
+	if probeTimeout <= 0 {
+		probeTimeout = defaultProbeTimeout
+	}
+
+	probeCtx := ctx
+	connectOpts := []nats.Option{}
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		probeCtx, cancel = context.WithTimeout(ctx, probeTimeout)
+		defer cancel()
+
+		connectOpts = append(connectOpts, nats.Timeout(probeTimeout))
+	}
+
+	nc, err := nats.Connect(url, connectOpts...)
 	if err != nil {
 		return ProbeResult{}, fmt.Errorf("cannot connect to NATS server %q: %w", url, err)
 	}
 	defer nc.Close()
 
-	if err := nc.FlushWithContext(ctx); err != nil {
+	if err := nc.FlushWithContext(probeCtx); err != nil {
 		return ProbeResult{}, fmt.Errorf("connected to NATS server %q but the connection is not usable: %w", url, err)
 	}
 
@@ -50,7 +68,7 @@ func (Client) Probe(ctx context.Context, cfg config.NATSConfig) (ProbeResult, er
 		return result, fmt.Errorf("connected to NATS server %q but JetStream is unavailable: %w", url, err)
 	}
 
-	if _, err := js.AccountInfo(); err != nil {
+	if _, err := js.AccountInfo(nats.Context(probeCtx)); err != nil {
 		return result, fmt.Errorf("connected to NATS server %q but JetStream is not responding: %w", url, err)
 	}
 

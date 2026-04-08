@@ -1,8 +1,9 @@
 package app
 
 const (
-	Name        = "nexus"
-	DisplayName = "Nexus"
-	Version     = "0.1.0"
-	NATSURLEnv  = "NEXUS_NATS_URL"
+	Name                = "nexus"
+	DisplayName         = "Nexus"
+	Version             = "0.1.0"
+	NATSURLEnv          = "NEXUS_NATS_URL"
+	NATSProbeTimeoutEnv = "NEXUS_NATS_PROBE_TIMEOUT"
 )

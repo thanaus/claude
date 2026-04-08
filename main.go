@@ -6,10 +6,15 @@ import (
 	"os"
 
 	"github.com/nexus/nexus/cmd"
+	natsclient "github.com/nexus/nexus/internal/nats"
 )
 
 func main() {
-	if err := cmd.ExecuteContext(context.Background()); err != nil {
+	deps := cmd.Deps{
+		NATSClient: natsclient.Client{},
+	}
+
+	if err := cmd.NewRootCmd(deps).ExecuteContext(context.Background()); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
