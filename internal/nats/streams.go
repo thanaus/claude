@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/nats-io/nats.go/jetstream"
 )
@@ -61,8 +62,16 @@ func EnsureStreams(ctx context.Context, js jetstream.JetStream) ([]ResourceStatu
 }
 
 func ensureStream(ctx context.Context, js jetstream.JetStream, cfg jetstream.StreamConfig) (ResourceStatus, error) {
-	_, err := js.Stream(ctx, cfg.Name)
+	stream, err := js.Stream(ctx, cfg.Name)
 	if err == nil {
+		info, err := stream.Info(ctx)
+		if err != nil {
+			return ResourceStatus{}, fmt.Errorf("cannot inspect stream %q: %w", cfg.Name, err)
+		}
+		if streamConfigMatches(info.Config, cfg) {
+			return ResourceStatus{Name: cfg.Name, Status: "ready"}, nil
+		}
+
 		if _, err := js.UpdateStream(ctx, cfg); err != nil {
 			return ResourceStatus{}, fmt.Errorf("cannot update stream %q: %w", cfg.Name, err)
 		}
@@ -76,4 +85,12 @@ func ensureStream(ctx context.Context, js jetstream.JetStream, cfg jetstream.Str
 		return ResourceStatus{}, fmt.Errorf("cannot create stream %q: %w", cfg.Name, err)
 	}
 	return ResourceStatus{Name: cfg.Name, Status: "created"}, nil
+}
+
+func streamConfigMatches(existing, expected jetstream.StreamConfig) bool {
+	return existing.Name == expected.Name &&
+		slices.Equal(existing.Subjects, expected.Subjects) &&
+		existing.Retention == expected.Retention &&
+		existing.Storage == expected.Storage &&
+		existing.Replicas == expected.Replicas
 }

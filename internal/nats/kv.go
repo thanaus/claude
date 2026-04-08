@@ -53,6 +53,9 @@ func SaveJob(ctx context.Context, kv jetstream.KeyValue, job SyncJob) (ResourceS
 	}
 
 	if _, err := kv.Create(ctx, job.Token, payload); err != nil {
+		if errors.Is(err, jetstream.ErrKeyExists) {
+			return ResourceStatus{}, fmt.Errorf("sync job token %q already exists: %w", job.Token, err)
+		}
 		return ResourceStatus{}, fmt.Errorf("cannot store sync job %q: %w", job.Token, err)
 	}
 

@@ -3,6 +3,7 @@ package natsclient
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -10,6 +11,8 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 	"github.com/nexus/nexus/internal/config"
 )
+
+const maxTokenCollisionRetries = 3
 
 // PrepareResult reports the NATS readiness and the resources prepared for Nexus.
 type PrepareResult struct {
@@ -72,29 +75,34 @@ func (Provisioner) Provision(ctx context.Context, cfg config.NATSConfig, source,
 	}
 	result.KeyValue = bucket
 
-	token, err := newToken()
-	if err != nil {
-		return result, fmt.Errorf("cannot generate sync token: %w", err)
+	for attempt := 0; attempt < maxTokenCollisionRetries; attempt++ {
+		token, err := newToken()
+		if err != nil {
+			return result, fmt.Errorf("cannot generate sync token: %w", err)
+		}
+
+		job := SyncJob{
+			Token:         token,
+			Source:        source,
+			Destination:   destination,
+			FilesSubject:  FilesSubject(token),
+			StatusSubject: StatusSubject(token),
+			State:         "active",
+			CreatedAt:     time.Now().UTC(),
+		}
+
+		jobStatus, err := SaveJob(provisionCtx, kv, job)
+		if err == nil {
+			result.Token = token
+			result.Job = jobStatus
+			return result, nil
+		}
+		if !errors.Is(err, jetstream.ErrKeyExists) {
+			return result, err
+		}
 	}
 
-	job := SyncJob{
-		Token:        token,
-		Source:       source,
-		Destination:  destination,
-		FilesSubject: FilesSubject(token),
-		StatusSubject: StatusSubject(token),
-		State:        "active",
-		CreatedAt:    time.Now().UTC(),
-	}
-
-	jobStatus, err := SaveJob(provisionCtx, kv, job)
-	if err != nil {
-		return result, err
-	}
-	result.Token = token
-	result.Job = jobStatus
-
-	return result, nil
+	return result, fmt.Errorf("cannot allocate a unique sync token after %d attempts", maxTokenCollisionRetries)
 }
 
 func newToken() (string, error) {
