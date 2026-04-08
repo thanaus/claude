@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 )
 
 const (
@@ -29,25 +29,25 @@ type ResourceStatus struct {
 	Status string
 }
 
-var streamConfigs = []*nats.StreamConfig{
+var streamConfigs = []jetstream.StreamConfig{
 	{
 		Name:      filesStreamName,
 		Subjects:  []string{"sync.files.>"},
-		Retention: nats.LimitsPolicy,
-		Storage:   nats.FileStorage,
+		Retention: jetstream.LimitsPolicy,
+		Storage:   jetstream.FileStorage,
 		Replicas:  1,
 	},
 	{
 		Name:      statusStreamName,
 		Subjects:  []string{"sync.status.>"},
-		Retention: nats.LimitsPolicy,
-		Storage:   nats.FileStorage,
+		Retention: jetstream.LimitsPolicy,
+		Storage:   jetstream.FileStorage,
 		Replicas:  1,
 	},
 }
 
 // EnsureStreams creates or updates the JetStream streams required by Nexus.
-func EnsureStreams(ctx context.Context, js nats.JetStreamContext) ([]ResourceStatus, error) {
+func EnsureStreams(ctx context.Context, js jetstream.JetStream) ([]ResourceStatus, error) {
 	statuses := make([]ResourceStatus, 0, len(streamConfigs))
 	for _, cfg := range streamConfigs {
 		status, err := ensureStream(ctx, js, cfg)
@@ -60,20 +60,20 @@ func EnsureStreams(ctx context.Context, js nats.JetStreamContext) ([]ResourceSta
 	return statuses, nil
 }
 
-func ensureStream(ctx context.Context, js nats.JetStreamContext, cfg *nats.StreamConfig) (ResourceStatus, error) {
-	_, err := js.StreamInfo(cfg.Name, nats.Context(ctx))
-	switch {
-	case err == nil:
-		if _, err := js.UpdateStream(cfg, nats.Context(ctx)); err != nil {
+func ensureStream(ctx context.Context, js jetstream.JetStream, cfg jetstream.StreamConfig) (ResourceStatus, error) {
+	_, err := js.Stream(ctx, cfg.Name)
+	if err == nil {
+		if _, err := js.UpdateStream(ctx, cfg); err != nil {
 			return ResourceStatus{}, fmt.Errorf("cannot update stream %q: %w", cfg.Name, err)
 		}
 		return ResourceStatus{Name: cfg.Name, Status: "ready"}, nil
-	case errors.Is(err, nats.ErrStreamNotFound):
-		if _, err := js.AddStream(cfg, nats.Context(ctx)); err != nil {
-			return ResourceStatus{}, fmt.Errorf("cannot create stream %q: %w", cfg.Name, err)
-		}
-		return ResourceStatus{Name: cfg.Name, Status: "created"}, nil
-	default:
+	}
+	if !errors.Is(err, jetstream.ErrStreamNotFound) {
 		return ResourceStatus{}, fmt.Errorf("cannot inspect stream %q: %w", cfg.Name, err)
 	}
+
+	if _, err := js.CreateOrUpdateStream(ctx, cfg); err != nil {
+		return ResourceStatus{}, fmt.Errorf("cannot create stream %q: %w", cfg.Name, err)
+	}
+	return ResourceStatus{Name: cfg.Name, Status: "created"}, nil
 }

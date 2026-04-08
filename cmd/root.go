@@ -8,13 +8,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Deps gathers the shared infrastructure dependencies required by commands.
-type Deps struct {
-	NATSClient natsclient.Client
-}
-
 // NewRootCmd builds the CLI and wires shared infrastructure into subcommands.
-func NewRootCmd(deps Deps) *cobra.Command {
+func NewRootCmd() *cobra.Command {
 	root := buildRootCmd()
 
 	root.AddCommand(NewSyncCmd(syncservice.New(natsclient.Provisioner{})))

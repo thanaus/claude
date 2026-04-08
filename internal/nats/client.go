@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 	"github.com/nexus/nexus/internal/config"
 )
 
@@ -47,12 +48,12 @@ func (Client) Probe(ctx context.Context, cfg config.NATSConfig) (ProbeResult, er
 		NATSReachable: true,
 	}
 
-	js, err := nc.JetStream()
+	js, err := jetstream.New(nc)
 	if err != nil {
 		return result, fmt.Errorf("connected to NATS server %q but JetStream is unavailable: %w", url, err)
 	}
 
-	if _, err := js.AccountInfo(nats.Context(probeCtx)); err != nil {
+	if _, err := js.AccountInfo(probeCtx); err != nil {
 		return result, fmt.Errorf("connected to NATS server %q but JetStream is not responding: %w", url, err)
 	}
 

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 	"github.com/nexus/nexus/internal/config"
 )
 
@@ -50,12 +50,12 @@ func (Provisioner) Provision(ctx context.Context, cfg config.NATSConfig, source,
 		NATSReachable: true,
 	}
 
-	js, err := nc.JetStream()
+	js, err := jetstream.New(nc)
 	if err != nil {
 		return result, fmt.Errorf("connected to NATS server %q but JetStream is unavailable: %w", url, err)
 	}
 
-	if _, err := js.AccountInfo(nats.Context(provisionCtx)); err != nil {
+	if _, err := js.AccountInfo(provisionCtx); err != nil {
 		return result, fmt.Errorf("connected to NATS server %q but JetStream is not responding: %w", url, err)
 	}
 	result.JetStreamReady = true
@@ -66,7 +66,7 @@ func (Provisioner) Provision(ctx context.Context, cfg config.NATSConfig, source,
 	}
 	result.Streams = streams
 
-	kv, bucket, err := EnsureBucket(js)
+	kv, bucket, err := EnsureBucket(provisionCtx, js)
 	if err != nil {
 		return result, err
 	}
@@ -87,7 +87,7 @@ func (Provisioner) Provision(ctx context.Context, cfg config.NATSConfig, source,
 		CreatedAt:    time.Now().UTC(),
 	}
 
-	jobStatus, err := SaveJob(kv, job)
+	jobStatus, err := SaveJob(provisionCtx, kv, job)
 	if err != nil {
 		return result, err
 	}
