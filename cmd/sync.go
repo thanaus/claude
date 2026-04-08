@@ -5,6 +5,8 @@ import (
 
 	"github.com/nexus/nexus/internal/app"
 	"github.com/nexus/nexus/internal/cli/validator"
+	natsclient "github.com/nexus/nexus/internal/nats"
+	syncservice "github.com/nexus/nexus/internal/service/sync"
 	"github.com/spf13/cobra"
 )
 
@@ -29,8 +31,21 @@ No files are transferred during this step.`,
 		source := args[0]
 		destination := args[1]
 
+		service := syncservice.New(natsclient.Client{})
+		result, err := service.CheckNATS(cmd.Context(), syncservice.Input{
+			Source:      source,
+			Destination: destination,
+		})
+		if err != nil {
+			return err
+		}
+
 		fmt.Printf("Syncing: %s → %s\n", source, destination)
-		// TODO: implement business logic
+		fmt.Printf("NATS connection OK: %s\n", result.NATS.URL)
+		if result.NATS.JetStreamReady {
+			fmt.Println("JetStream is available.")
+		}
+
 		return nil
 	},
 }
