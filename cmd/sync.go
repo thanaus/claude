@@ -2,10 +2,10 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/nexus/nexus/internal/app"
 	"github.com/nexus/nexus/internal/cli/validator"
+	"github.com/nexus/nexus/internal/config"
 	syncservice "github.com/nexus/nexus/internal/service/sync"
 	"github.com/spf13/cobra"
 )
@@ -46,6 +46,7 @@ func newSyncRunE(svc syncservice.Service) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
 		source := args[0]
 		destination := args[1]
+		natsCfg, _ := config.NATSConfigFromContext(cmd.Context())
 
 		result, err := svc.Provision(cmd.Context(), syncservice.Input{
 			Source:      source,
@@ -53,7 +54,7 @@ func newSyncRunE(svc syncservice.Service) func(*cobra.Command, []string) error {
 		})
 		if err != nil {
 			return runtimeError(
-				fmt.Sprintf("Failed to initialize NATS resources: %s", os.Getenv(app.NATSURLEnv)),
+				fmt.Sprintf("Failed to initialize NATS resources: %s", natsCfg.URL),
 				fmt.Sprintf("Ensure the NATS server is running, JetStream is enabled, and reachable.\nCheck the %s environment variable.", app.NATSURLEnv),
 				err,
 			)

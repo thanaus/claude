@@ -92,16 +92,17 @@ func ValidateLimit() Rule {
 // ValidateNATSConfig checks that the NATS configuration can be loaded.
 func ValidateNATSConfig(hint string) Rule {
 	return func(cmd *cobra.Command, args []string) *output.ValidationError {
-		_, err := config.LoadNATSFromEnv()
-		if err == nil {
-			return nil
+		cfg, err := config.LoadNATSFromEnv()
+		if err != nil {
+			return &output.ValidationError{
+				Message: err.Error(),
+				Hint:    hint,
+				Usage:   cmd.UseLine(),
+			}
 		}
 
-		return &output.ValidationError{
-			Message: err.Error(),
-			Hint:    hint,
-			Usage:   cmd.UseLine(),
-		}
+		cmd.SetContext(config.WithNATSConfig(cmd.Context(), cfg))
+		return nil
 	}
 }
 

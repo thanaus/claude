@@ -36,15 +36,15 @@ func New(natsProvisioner NATSProvisioner) Service {
 	}
 }
 
-// Provision loads the NATS configuration and prepares the required NATS resources.
+// Provision prepares the required NATS resources using the resolved config in ctx.
 func (s Service) Provision(ctx context.Context, in Input) (Result, error) {
 	if s.NATSProvisioner == nil {
 		return Result{}, fmt.Errorf("sync service is not configured")
 	}
 
-	cfg, err := config.LoadNATSFromEnv()
-	if err != nil {
-		return Result{}, err
+	cfg, ok := config.NATSConfigFromContext(ctx)
+	if !ok {
+		return Result{}, fmt.Errorf("missing NATS configuration in context")
 	}
 
 	prepared, err := s.NATSProvisioner.Provision(ctx, cfg, in.Source, in.Destination)
