@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/nexus/nexus/internal/app"
 	"github.com/nexus/nexus/internal/cli/validator"
@@ -29,9 +30,8 @@ No files are transferred during this step.`,
 	}
 
 	v := validator.New().Add(
-		validator.ValidateEnvRequired(
-			app.NATSURLEnv,
-			"Define the NATS server URL before creating a synchronization job",
+		validator.ValidateNATSConfig(
+			fmt.Sprintf("Define a valid NATS configuration before creating a synchronization job.\nCheck %s and, if set, %s.", app.NATSURLEnv, app.NATSProbeTimeoutEnv),
 		),
 		validator.ValidateSyncPaths(0, 1),
 	)
@@ -47,12 +47,16 @@ func newSyncRunE(svc syncservice.Service) func(*cobra.Command, []string) error {
 		source := args[0]
 		destination := args[1]
 
-		result, err := svc.CheckNATS(cmd.Context(), syncservice.Input{
+		result, err := svc.Provision(cmd.Context(), syncservice.Input{
 			Source:      source,
 			Destination: destination,
 		})
 		if err != nil {
-			return err
+			return runtimeError(
+				fmt.Sprintf("Unable to connect to NATS server: %s", os.Getenv(app.NATSURLEnv)),
+				fmt.Sprintf("Ensure the NATS server is running and reachable.\nCheck the %s environment variable.", app.NATSURLEnv),
+				err,
+			)
 		}
 
 		fmt.Printf("Syncing: %s → %s\n", source, destination)
@@ -60,6 +64,7 @@ func newSyncRunE(svc syncservice.Service) func(*cobra.Command, []string) error {
 		if result.NATS.JetStreamReady {
 			fmt.Println("JetStream is available.")
 		}
+		fmt.Println("NATS streams and KV bucket are ready.")
 
 		return nil
 	}

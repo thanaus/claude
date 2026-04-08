@@ -56,8 +56,6 @@ func flagErrorFunc(cmd *cobra.Command, err error) error {
 		return validationError(msg, fmt.Sprintf("Use '%s --help' to list the available flags.", cmd.CommandPath()))
 	case strings.Contains(msg, "required flag(s)"):
 		return validationError(msg, fmt.Sprintf("Use '%s --help' to see the required flags.", cmd.CommandPath()))
-	case strings.Contains(msg, "\"--timeout\""):
-		return validationError("--timeout must be a valid duration", "Example: --timeout 30s or --timeout 2m")
 	default:
 		return validationError(msg, fmt.Sprintf("Use '%s --help' for usage details.", cmd.CommandPath()))
 	}
@@ -73,4 +71,12 @@ func validationErrorWithUsage(message, hint, usage string) error {
 		Hint:    hint,
 		Usage:   usage,
 	}}))
+}
+
+func runtimeError(message, hint string, cause error) error {
+	return fmt.Errorf("%s", output.FormatRuntimeError(&output.RuntimeError{
+		Message: message,
+		Hint:    hint,
+		Cause:   cause,
+	}))
 }

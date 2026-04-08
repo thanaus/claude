@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/nexus/nexus/internal/cli/output"
+	"github.com/nexus/nexus/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -88,16 +89,16 @@ func ValidateLimit() Rule {
 	}
 }
 
-// ValidateEnvRequired checks that an environment variable is defined.
-func ValidateEnvRequired(envVarName, hint string) Rule {
+// ValidateNATSConfig checks that the NATS configuration can be loaded.
+func ValidateNATSConfig(hint string) Rule {
 	return func(cmd *cobra.Command, args []string) *output.ValidationError {
-		val, ok := os.LookupEnv(envVarName)
-		if ok && strings.TrimSpace(val) != "" {
+		_, err := config.LoadNATSFromEnv()
+		if err == nil {
 			return nil
 		}
 
 		return &output.ValidationError{
-			Message: fmt.Sprintf("Missing required environment variable: %s", envVarName),
+			Message: err.Error(),
 			Hint:    hint,
 			Usage:   cmd.UseLine(),
 		}
