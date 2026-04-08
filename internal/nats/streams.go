@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/nats-io/nats.go/jetstream"
 )
@@ -34,16 +35,20 @@ var streamConfigs = []jetstream.StreamConfig{
 	{
 		Name:      filesStreamName,
 		Subjects:  []string{"sync.files.>"},
-		Retention: jetstream.LimitsPolicy,
+		Retention: jetstream.WorkQueuePolicy,
 		Storage:   jetstream.FileStorage,
 		Replicas:  1,
+		MaxAge:    24 * time.Hour,
+		MaxMsgs:   500_000,
+		Discard:   jetstream.DiscardOld,
 	},
 	{
 		Name:      statusStreamName,
 		Subjects:  []string{"sync.status.>"},
-		Retention: jetstream.LimitsPolicy,
-		Storage:   jetstream.FileStorage,
+		Retention: jetstream.InterestPolicy,
+		Storage:   jetstream.MemoryStorage,
 		Replicas:  1,
+		MaxAge:    time.Hour,
 	},
 }
 
