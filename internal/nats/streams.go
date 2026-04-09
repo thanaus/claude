@@ -14,6 +14,7 @@ const (
 	discoveryStreamName  = "DISCOVERY"
 	workStreamName       = "WORK"
 	monitoringStreamName = "MONITORING"
+	WorkQueueMaxMsgs     = 500_000
 )
 
 // DiscoverySubject returns the subject prefix used to store discovery work for a job.
@@ -45,7 +46,7 @@ var streamConfigs = []jetstream.StreamConfig{
 		Storage:   jetstream.FileStorage,
 		Replicas:  1,
 		MaxAge:    24 * time.Hour,
-		MaxMsgs:   500_000,
+		MaxMsgs:   WorkQueueMaxMsgs,
 		Discard:   jetstream.DiscardOld,
 	},
 	{
@@ -55,7 +56,7 @@ var streamConfigs = []jetstream.StreamConfig{
 		Storage:   jetstream.FileStorage,
 		Replicas:  1,
 		MaxAge:    24 * time.Hour,
-		MaxMsgs:   500_000,
+		MaxMsgs:   WorkQueueMaxMsgs,
 		Discard:   jetstream.DiscardOld,
 	},
 	{

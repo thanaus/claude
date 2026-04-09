@@ -63,13 +63,32 @@ func newLSRunE(svc lsservice.Service) func(*cobra.Command, []string) error {
 		fmt.Println("✔ LS prerequisites ready")
 		fmt.Println()
 		fmt.Printf("%-14s %s\n", "Token:", token)
+		fmt.Printf("%-14s %s\n", "Source:", result.Job.Source)
+		fmt.Printf("%-14s %s\n", "State:", result.Job.State)
 		fmt.Println()
 		fmt.Printf("%-14s %s\n", "NATS:", result.URL)
 		fmt.Printf("%-14s %s\n", "JetStream:", jetStreamStatus(result.JetStreamReady))
 		fmt.Println()
 		fmt.Println("Resources:")
 		fmt.Printf("  %-21s %s %s\n", "KV "+result.KeyValue.Name, "✔", resourceDisplayStatus(result.KeyValue.Status))
+		fmt.Printf("  %-21s %s %s\n", "DISCOVERY root", "✔", boolStatus(result.DiscoveryPublished))
+		fmt.Printf("  %-21s %s %d\n", "Entries discovered", "✔", result.DiscoveredEntries)
+		fmt.Printf("  %-21s %s %d\n", "Published to WORK", "✔", result.PublishedWork)
+		fmt.Printf("  %-21s %s %d\n", "Errors", "✔", result.Errors)
+		if result.Warning != "" {
+			fmt.Println()
+			fmt.Println("Note:")
+			fmt.Printf("  %s\n", result.Warning)
+		}
 
 		return nil
 	}
+}
+
+func boolStatus(ok bool) string {
+	if ok {
+		return "published"
+	}
+
+	return "pending"
 }

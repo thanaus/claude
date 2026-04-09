@@ -12,6 +12,13 @@ import (
 
 const jobsBucketName = "jobs"
 
+const (
+	JobStatePending   = "pending"
+	JobStateRunning   = "running"
+	JobStateCompleted = "completed"
+	JobStateFailed    = "failed"
+)
+
 // Job stores the metadata required to operate a job.
 type Job struct {
 	Token             string    `json:"token"`
@@ -22,6 +29,11 @@ type Job struct {
 	MonitoringSubject string    `json:"monitoringSubject"`
 	State             string    `json:"state"`
 	CreatedAt         time.Time `json:"createdAt"`
+	StartedAt         *time.Time `json:"startedAt,omitempty"`
+	UpdatedAt         *time.Time `json:"updatedAt,omitempty"`
+	DiscoveredEntries uint64    `json:"discoveredEntries,omitempty"`
+	PublishedWork     uint64    `json:"publishedWork,omitempty"`
+	Errors            uint64    `json:"errors,omitempty"`
 }
 
 // EnsureJobsBucket creates the KV bucket required to store job metadata.
@@ -74,4 +86,39 @@ func SaveJob(ctx context.Context, kv jetstream.KeyValue, job Job) (ResourceStatu
 	}
 
 	return ResourceStatus{Name: job.Token, Status: "created"}, nil
+}
+
+// LoadJob retrieves a job from the KV bucket.
+func LoadJob(ctx context.Context, kv jetstream.KeyValue, token string) (Job, error) {
+	entry, err := kv.Get(ctx, token)
+	if err != nil {
+		if errors.Is(err, jetstream.ErrKeyNotFound) {
+			return Job{}, fmt.Errorf("job token %q not found: %w", token, err)
+		}
+		return Job{}, fmt.Errorf("cannot load job %q: %w", token, err)
+	}
+
+	var job Job
+	if err := json.Unmarshal(entry.Value(), &job); err != nil {
+		return Job{}, fmt.Errorf("cannot decode job %q: %w", token, err)
+	}
+	if job.Token == "" {
+		job.Token = token
+	}
+
+	return job, nil
+}
+
+// UpdateJob overwrites an existing job in the KV bucket.
+func UpdateJob(ctx context.Context, kv jetstream.KeyValue, job Job) (ResourceStatus, error) {
+	payload, err := json.Marshal(job)
+	if err != nil {
+		return ResourceStatus{}, fmt.Errorf("cannot encode job %q: %w", job.Token, err)
+	}
+
+	if _, err := kv.Put(ctx, job.Token, payload); err != nil {
+		return ResourceStatus{}, fmt.Errorf("cannot update job %q: %w", job.Token, err)
+	}
+
+	return ResourceStatus{Name: job.Token, Status: "updated"}, nil
 }

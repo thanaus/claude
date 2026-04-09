@@ -72,6 +72,7 @@ func (s Service) Provision(ctx context.Context, in Input) (Result, error) {
 
 	for attempt := 0; attempt < maxTokenCollisionRetries; attempt++ {
 		token := uuid.NewString()
+		now := time.Now().UTC()
 
 		job := natsclient.Job{
 			Token:             token,
@@ -80,8 +81,9 @@ func (s Service) Provision(ctx context.Context, in Input) (Result, error) {
 			DiscoverySubject:  natsclient.DiscoverySubject(token),
 			WorkSubject:       natsclient.WorkSubject(token),
 			MonitoringSubject: natsclient.MonitoringSubject(token),
-			State:             "active",
-			CreatedAt:         time.Now().UTC(),
+			State:             natsclient.JobStatePending,
+			CreatedAt:         now,
+			UpdatedAt:         &now,
 		}
 
 		jobStatus, err := natsclient.SaveJob(session.Context, kv, job)
