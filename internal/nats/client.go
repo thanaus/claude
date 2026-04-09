@@ -13,13 +13,6 @@ import (
 
 const defaultProbeTimeout = 5 * time.Second
 
-// ProbeResult reports the current NATS and JetStream readiness.
-type ProbeResult struct {
-	URL            string
-	NATSReachable  bool
-	JetStreamReady bool
-}
-
 // JetStreamSession wraps a ready-to-use NATS connection and JetStream handle.
 type JetStreamSession struct {
 	URL       string
@@ -28,9 +21,6 @@ type JetStreamSession struct {
 	Context   context.Context
 	cancel    context.CancelFunc
 }
-
-// Client probes a NATS server and validates that it can be used.
-type Client struct{}
 
 // OpenJetStream connects to NATS and returns a ready-to-use JetStream session.
 func OpenJetStream(ctx context.Context, cfg config.NATSConfig) (*JetStreamSession, error) {
@@ -93,21 +83,6 @@ func (s *JetStreamSession) Close() {
 	if s.Conn != nil {
 		s.Conn.Close()
 	}
-}
-
-// Probe connects to NATS, verifies the server answers, and checks JetStream.
-func (Client) Probe(ctx context.Context, cfg config.NATSConfig) (ProbeResult, error) {
-	session, err := OpenJetStream(ctx, cfg)
-	if err != nil {
-		return ProbeResult{}, err
-	}
-	defer session.Close()
-
-	return ProbeResult{
-		URL:           session.URL,
-		NATSReachable: true,
-		JetStreamReady: true,
-	}, nil
 }
 
 func connect(ctx context.Context, cfg config.NATSConfig) (*nats.Conn, context.Context, context.CancelFunc, error) {

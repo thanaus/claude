@@ -113,12 +113,12 @@ func ValidateSyncPaths(sourceIndex, destinationIndex int) Rule {
 			return nil
 		}
 
-		sourcePath, sourceInfo, err := ResolveExistingDir(args[sourceIndex])
+		sourcePath, sourceInfo, err := resolveExistingDir(args[sourceIndex])
 		if err != nil {
 			return newDirectoryValidationError(cmd, "Source", args[sourceIndex], err, "Define a valid existing source directory on the local filesystem.")
 		}
 
-		destinationPath, destinationInfo, err := ResolveExistingDir(args[destinationIndex])
+		destinationPath, destinationInfo, err := resolveExistingDir(args[destinationIndex])
 		if err != nil {
 			return newDirectoryValidationError(cmd, "Destination", args[destinationIndex], err, "Define a valid existing destination directory on the local filesystem.")
 		}
@@ -130,6 +130,11 @@ func ValidateSyncPaths(sourceIndex, destinationIndex int) Rule {
 				Usage:   cmd.UseLine(),
 			}
 		}
+
+		cmd.SetContext(config.WithSyncPaths(cmd.Context(), config.SyncPaths{
+			Source:      sourcePath,
+			Destination: destinationPath,
+		}))
 
 		return nil
 	}
@@ -160,8 +165,7 @@ func newDirectoryValidationError(cmd *cobra.Command, argName, path string, err e
 	}
 }
 
-// ResolveExistingDir returns the canonical path and file info for an existing directory.
-func ResolveExistingDir(path string) (string, os.FileInfo, error) {
+func resolveExistingDir(path string) (string, os.FileInfo, error) {
 	cleanedPath := filepath.Clean(strings.TrimSpace(path))
 	absolutePath, err := filepath.Abs(cleanedPath)
 	if err != nil {

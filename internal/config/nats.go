@@ -1,7 +1,6 @@
 package config
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -14,19 +13,6 @@ import (
 type NATSConfig struct {
 	URL          string
 	ProbeTimeout time.Duration
-}
-
-type natsConfigContextKey struct{}
-
-// WithNATSConfig stores a resolved NATS configuration in the context.
-func WithNATSConfig(ctx context.Context, cfg NATSConfig) context.Context {
-	return context.WithValue(ctx, natsConfigContextKey{}, cfg)
-}
-
-// NATSConfigFromContext returns the resolved NATS configuration from the context.
-func NATSConfigFromContext(ctx context.Context) (NATSConfig, bool) {
-	cfg, ok := ctx.Value(natsConfigContextKey{}).(NATSConfig)
-	return cfg, ok
 }
 
 // LoadNATSFromEnv loads the NATS configuration from environment variables.
