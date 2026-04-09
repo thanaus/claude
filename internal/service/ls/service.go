@@ -180,7 +180,7 @@ func scanSource(ctx context.Context, js jetstream.JetStream, job natsclient.Job,
 	var errorCount atomic.Uint64
 	var firstErr error
 	var firstErrOnce sync.Once
-	var scanWG sync.WaitGroup
+	var statWG sync.WaitGroup
 	var publishWG sync.WaitGroup
 	var progressWG sync.WaitGroup
 	progressDone := make(chan struct{})
@@ -193,7 +193,7 @@ func scanSource(ctx context.Context, js jetstream.JetStream, job natsclient.Job,
 		}})
 	}
 
-	setErr := func(err error) {
+	setFatalErr := func(err error) {
 		if err == nil {
 			return
 		}
@@ -202,6 +202,10 @@ func scanSource(ctx context.Context, js jetstream.JetStream, job natsclient.Job,
 			errorCount.Add(1)
 			cancel()
 		})
+	}
+
+	recordEntryErr := func(error) {
+		errorCount.Add(1)
 	}
 
 	progressWG.Add(1)
@@ -225,14 +229,12 @@ func scanSource(ctx context.Context, js jetstream.JetStream, job natsclient.Job,
 		}
 	}()
 
-	scanWG.Add(1)
 	go func() {
-		defer scanWG.Done()
 		defer close(entriesCh)
 
 		f, err := os.Open(job.Source)
 		if err != nil {
-			setErr(fmt.Errorf("cannot open source directory %q: %w", job.Source, err))
+			setFatalErr(fmt.Errorf("cannot open source directory %q: %w", job.Source, err))
 			return
 		}
 		defer f.Close()
@@ -244,7 +246,7 @@ func scanSource(ctx context.Context, js jetstream.JetStream, job natsclient.Job,
 
 			entries, err := f.ReadDir(readDirBatchSize)
 			if err != nil && !errors.Is(err, io.EOF) {
-				setErr(fmt.Errorf("cannot read source directory %q: %w", job.Source, err))
+				setFatalErr(fmt.Errorf("cannot read source directory %q: %w", job.Source, err))
 				return
 			}
 
@@ -264,9 +266,9 @@ func scanSource(ctx context.Context, js jetstream.JetStream, job natsclient.Job,
 	}()
 
 	for range workers {
-		scanWG.Add(1)
+		statWG.Add(1)
 		go func() {
-			defer scanWG.Done()
+			defer statWG.Done()
 
 			for {
 				select {
@@ -280,13 +282,13 @@ func scanSource(ctx context.Context, js jetstream.JetStream, job natsclient.Job,
 					fullPath := filepath.Join(job.Source, entry.Name())
 					info, err := os.Lstat(fullPath)
 					if err != nil {
-						setErr(fmt.Errorf("cannot stat entry %q: %w", fullPath, err))
-						return
+						recordEntryErr(fmt.Errorf("cannot stat entry %q: %w", fullPath, err))
+						continue
 					}
 
 					relativePath, err := filepath.Rel(job.Source, fullPath)
 					if err != nil {
-						setErr(fmt.Errorf("cannot derive relative path for %q from source %q: %w", fullPath, job.Source, err))
+						setFatalErr(fmt.Errorf("cannot derive relative path for %q from source %q: %w", fullPath, job.Source, err))
 						return
 					}
 
@@ -302,7 +304,7 @@ func scanSource(ctx context.Context, js jetstream.JetStream, job natsclient.Job,
 	}
 
 	go func() {
-		scanWG.Wait()
+		statWG.Wait()
 		close(resultsCh)
 	}()
 
@@ -331,7 +333,7 @@ func scanSource(ctx context.Context, js jetstream.JetStream, job natsclient.Job,
 					}
 				}
 				if publishErr != nil {
-					setErr(publishErr)
+					setFatalErr(publishErr)
 					return
 				}
 			}
