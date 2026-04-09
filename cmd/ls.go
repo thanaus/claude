@@ -40,6 +40,7 @@ Workers can then consume these messages to perform synchronization.`,
 	lsCmd.Flags().StringP("output", "o", "table", "Output format: table, json")
 	lsCmd.Flags().StringP("filter", "f", "", "Filter resources by name (e.g. api, worker)")
 	lsCmd.Flags().IntP("limit", "l", 0, "Maximum number of results (0 = no limit)")
+	lsCmd.Flags().IntP("workers", "w", 4, "Number of scan workers")
 
 	return lsCmd
 }
@@ -48,41 +49,65 @@ func newLSRunE(svc lsservice.Service) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
 		token := args[0]
 		natsCfg, _ := config.NATSConfigFromContext(cmd.Context())
+		reporter := &lsCLIReporter{}
+		workers, _ := cmd.Flags().GetInt("workers")
 
 		result, err := svc.Run(cmd.Context(), lsservice.Input{
-			Token: token,
+			Token:    token,
+			Reporter: reporter,
+			Workers:  workers,
 		})
+		reporter.EndProgress()
 		if err != nil {
 			return runtimeError(
-				fmt.Sprintf("Failed to initialize ls prerequisites: %s", natsCfg.URL),
-				fmt.Sprintf("Ensure the NATS server is running, JetStream is enabled, and the KV bucket %q already exists.\nCreate a job first with '%s sync <source> <destination>'.", "jobs", app.Name),
+				fmt.Sprintf("Failed to run ls workflow: %s", natsCfg.URL),
+				fmt.Sprintf("Ensure the NATS server is running, JetStream is enabled, and the job token %q exists in the KV bucket %q.\nCreate a job first with '%s sync <source> <destination>'.", token, "jobs", app.Name),
 				err,
 			)
 		}
 
-		fmt.Println("✔ LS prerequisites ready")
-		fmt.Println()
-		fmt.Printf("%-14s %s\n", "Token:", token)
-		fmt.Printf("%-14s %s\n", "Source:", result.Job.Source)
-		fmt.Printf("%-14s %s\n", "State:", result.Job.State)
-		fmt.Println()
-		fmt.Printf("%-14s %s\n", "NATS:", result.URL)
-		fmt.Printf("%-14s %s\n", "JetStream:", jetStreamStatus(result.JetStreamReady))
-		fmt.Println()
-		fmt.Println("Resources:")
-		fmt.Printf("  %-21s %s %s\n", "KV "+result.KeyValue.Name, "✔", resourceDisplayStatus(result.KeyValue.Status))
-		fmt.Printf("  %-21s %s %s\n", "DISCOVERY root", "✔", boolStatus(result.DiscoveryPublished))
-		fmt.Printf("  %-21s %s %d\n", "Entries discovered", "✔", result.DiscoveredEntries)
-		fmt.Printf("  %-21s %s %d\n", "Published to WORK", "✔", result.PublishedWork)
-		fmt.Printf("  %-21s %s %d\n", "Errors", "✔", result.Errors)
-		if result.Warning != "" {
-			fmt.Println()
-			fmt.Println("Note:")
-			fmt.Printf("  %s\n", result.Warning)
-		}
+		printLSCompleted(result)
 
 		return nil
 	}
+}
+
+type lsCLIReporter struct {
+	progressActive bool
+}
+
+func (r *lsCLIReporter) OnPrepared(prepared lsservice.Prepared) {
+	printLSPrepared(prepared)
+}
+
+func (r *lsCLIReporter) OnProgress(progress lsservice.Progress) {
+	if r.progressActive {
+		clearProgressBlock()
+	}
+
+	fmt.Println("Progress:")
+	fmt.Printf("  %-19s %d\n", "Discovered", progress.DiscoveredEntries)
+	fmt.Printf("  %-19s %d\n", "Published", progress.PublishedWork)
+	fmt.Printf("  %-19s %d\n", "Errors", progress.Errors)
+	r.progressActive = true
+}
+
+func (r *lsCLIReporter) EndProgress() {
+	if !r.progressActive {
+		return
+	}
+
+	clearProgressBlock()
+	r.progressActive = false
+}
+
+func clearProgressBlock() {
+	fmt.Print("\033[4A")
+	for range 4 {
+		fmt.Print("\033[2K")
+		fmt.Print("\033[1B")
+	}
+	fmt.Print("\033[4A")
 }
 
 func boolStatus(ok bool) string {
@@ -91,4 +116,33 @@ func boolStatus(ok bool) string {
 	}
 
 	return "pending"
+}
+
+func printLSPrepared(prepared lsservice.Prepared) {
+	fmt.Println("✔ Scan started")
+	fmt.Println()
+	fmt.Printf("%-14s %s\n", "Token:", prepared.Job.Token)
+	fmt.Printf("%-14s %s\n", "Source:", prepared.Job.Source)
+	fmt.Printf("%-14s %s\n", "State:", prepared.Job.State)
+	fmt.Println()
+	fmt.Printf("%-14s %s\n", "NATS:", prepared.URL)
+	fmt.Printf("%-14s %s\n", "JetStream:", jetStreamStatus(prepared.JetStreamReady))
+	fmt.Println()
+	fmt.Println("Resources:")
+	fmt.Printf("  %-21s %s %s\n", "KV "+prepared.KeyValue.Name, "✔", resourceDisplayStatus(prepared.KeyValue.Status))
+	fmt.Printf("  %-21s %s %s\n", "DISCOVERY", "✔", boolStatus(prepared.DiscoveryPublished))
+	fmt.Println()
+}
+
+func printLSCompleted(result lsservice.Result) {
+	fmt.Println("✔ Scan completed")
+	fmt.Println()
+	fmt.Printf("%-14s %s\n", "Token:", result.Job.Token)
+	fmt.Printf("%-14s %s\n", "Source:", result.Job.Source)
+	fmt.Printf("%-14s %s\n", "State:", result.Job.State)
+	fmt.Println()
+	fmt.Println("Summary:")
+	fmt.Printf("  %-21s %s %d\n", "Entries discovered", "", result.DiscoveredEntries)
+	fmt.Printf("  %-21s %s %d\n", "Published to WORK", "", result.PublishedWork)
+	fmt.Printf("  %-21s %s %d\n", "Errors", "", result.Errors)
 }

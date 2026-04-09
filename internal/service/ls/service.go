@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"io"
 	"os"
 	"path/filepath"
@@ -18,13 +19,19 @@ import (
 
 const (
 	readDirBatchSize = 1024
-	workerCount      = 4
+	defaultWorkerCount = 4
+	defaultPublisherCount = 4
 	entryBufferSize  = 4096
+	publishMaxRetries = 5
+	publishRetryBase  = 100 * time.Millisecond
+	progressInterval = time.Second
 )
 
 // Input holds the parameters required by the ls use case.
 type Input struct {
-	Token string
+	Token    string
+	Reporter Reporter
+	Workers  int
 }
 
 // Result contains the outcome of the ls workflow.
@@ -38,7 +45,23 @@ type Result struct {
 	DiscoveredEntries  uint64
 	PublishedWork      uint64
 	Errors             uint64
-	Warning            string
+}
+
+// Prepared describes the state of the job once prerequisites are validated.
+type Prepared struct {
+	URL                string
+	NATSReachable      bool
+	JetStreamReady     bool
+	KeyValue           natsclient.ResourceStatus
+	Job                natsclient.Job
+	DiscoveryPublished bool
+}
+
+// Progress reports intermediate scan counters while ls is running.
+type Progress struct {
+	DiscoveredEntries uint64
+	PublishedWork     uint64
+	Errors            uint64
 }
 
 // Service orchestrates the ls workflow.
@@ -48,6 +71,12 @@ type scanStats struct {
 	DiscoveredEntries uint64
 	PublishedWork     uint64
 	Errors            uint64
+}
+
+// Reporter receives lifecycle callbacks for the ls workflow.
+type Reporter interface {
+	OnPrepared(Prepared)
+	OnProgress(Progress)
 }
 
 // New returns an ls service ready to run the listing workflow.
@@ -88,11 +117,10 @@ func (s Service) Run(ctx context.Context, in Input) (Result, error) {
 		JetStreamReady: true,
 		KeyValue:       bucket,
 		Job:            job,
-		Warning:        workQueueLimitWarning(),
 	}
 
 	startedAt := time.Now().UTC()
-	discoveryMessage := natsclient.NewRootDiscoveryMessage(job.Token, job.Source, startedAt)
+	discoveryMessage := natsclient.NewRootDiscoveryMessage(job.Source, startedAt)
 	if err := natsclient.PublishJSON(session.Context, session.JetStream, job.DiscoverySubject, discoveryMessage); err != nil {
 		return result, err
 	}
@@ -104,8 +132,25 @@ func (s Service) Run(ctx context.Context, in Input) (Result, error) {
 	if _, err := natsclient.UpdateJob(session.Context, kv, job); err != nil {
 		return result, err
 	}
+	result.Job = job
 
-	stats, scanErr := scanSource(session.Context, session.JetStream, job)
+	if in.Reporter != nil {
+		in.Reporter.OnPrepared(Prepared{
+			URL:                result.URL,
+			NATSReachable:      result.NATSReachable,
+			JetStreamReady:     result.JetStreamReady,
+			KeyValue:           result.KeyValue,
+			Job:                result.Job,
+			DiscoveryPublished: result.DiscoveryPublished,
+		})
+	}
+
+	workers := in.Workers
+	if workers <= 0 {
+		workers = defaultWorkerCount
+	}
+
+	stats, scanErr := scanSource(session.Context, session.JetStream, job, workers, in.Reporter)
 	result.DiscoveredEntries = stats.DiscoveredEntries
 	result.PublishedWork = stats.PublishedWork
 	result.Errors = stats.Errors
@@ -136,18 +181,33 @@ func (s Service) Run(ctx context.Context, in Input) (Result, error) {
 	return result, nil
 }
 
-func scanSource(ctx context.Context, js jetstream.JetStream, job natsclient.Job) (scanStats, error) {
+func scanSource(ctx context.Context, js jetstream.JetStream, job natsclient.Job, workers int, reporter Reporter) (scanStats, error) {
 	scanCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	entriesCh := make(chan os.DirEntry, entryBufferSize)
+	resultsCh := make(chan natsclient.WorkMessage, entryBufferSize)
 
 	var discoveredEntries atomic.Uint64
 	var publishedWork atomic.Uint64
 	var errorCount atomic.Uint64
 	var firstErr error
 	var firstErrOnce sync.Once
-	var wg sync.WaitGroup
+	var scanWG sync.WaitGroup
+	var publishWG sync.WaitGroup
+	var progressWG sync.WaitGroup
+	progressDone := make(chan struct{})
+
+	reportProgress := func() {
+		if reporter == nil {
+			return
+		}
+		reporter.OnProgress(Progress{
+			DiscoveredEntries: discoveredEntries.Load(),
+			PublishedWork:     publishedWork.Load(),
+			Errors:            errorCount.Load(),
+		})
+	}
 
 	setErr := func(err error) {
 		if err == nil {
@@ -160,9 +220,32 @@ func scanSource(ctx context.Context, js jetstream.JetStream, job natsclient.Job)
 		})
 	}
 
-	wg.Add(1)
+	if reporter != nil {
+		progressWG.Add(1)
+		go func() {
+			defer progressWG.Done()
+
+			ticker := time.NewTicker(progressInterval)
+			defer ticker.Stop()
+
+			for {
+				select {
+				case <-progressDone:
+					reportProgress()
+					return
+				case <-scanCtx.Done():
+					reportProgress()
+					return
+				case <-ticker.C:
+					reportProgress()
+				}
+			}
+		}()
+	}
+
+	scanWG.Add(1)
 	go func() {
-		defer wg.Done()
+		defer scanWG.Done()
 		defer close(entriesCh)
 
 		f, err := os.Open(job.Source)
@@ -198,10 +281,10 @@ func scanSource(ctx context.Context, js jetstream.JetStream, job natsclient.Job)
 		}
 	}()
 
-	for range workerCount {
-		wg.Add(1)
+	for range workers {
+		scanWG.Add(1)
 		go func() {
-			defer wg.Done()
+			defer scanWG.Done()
 
 			for {
 				select {
@@ -219,19 +302,63 @@ func scanSource(ctx context.Context, js jetstream.JetStream, job natsclient.Job)
 						return
 					}
 
-					message := buildWorkMessage(job.Token, fullPath, info)
-					if err := natsclient.PublishJSON(scanCtx, js, job.WorkSubject, message); err != nil {
-						setErr(err)
+					relativePath, err := filepath.Rel(job.Source, fullPath)
+					if err != nil {
+						setErr(fmt.Errorf("cannot derive relative path for %q from source %q: %w", fullPath, job.Source, err))
 						return
 					}
 
-					publishedWork.Add(1)
+					message := buildWorkMessage(relativePath, info)
+					select {
+					case <-scanCtx.Done():
+						return
+					case resultsCh <- message:
+					}
 				}
 			}
 		}()
 	}
 
-	wg.Wait()
+	go func() {
+		scanWG.Wait()
+		close(resultsCh)
+	}()
+
+	for range defaultPublisherCount {
+		publishWG.Add(1)
+		go func() {
+			defer publishWG.Done()
+
+			for message := range resultsCh {
+				var publishErr error
+				for attempt := range publishMaxRetries {
+					if scanCtx.Err() != nil {
+						return
+					}
+
+					if err := natsclient.PublishJSON(scanCtx, js, job.WorkSubject, message); err == nil {
+						publishedWork.Add(1)
+						publishErr = nil
+						break
+					} else {
+						publishErr = err
+					}
+
+					if attempt < publishMaxRetries-1 {
+						time.Sleep(time.Duration(1<<attempt) * publishRetryBase)
+					}
+				}
+				if publishErr != nil {
+					setErr(publishErr)
+					return
+				}
+			}
+		}()
+	}
+
+	publishWG.Wait()
+	close(progressDone)
+	progressWG.Wait()
 
 	stats := scanStats{
 		DiscoveredEntries: discoveredEntries.Load(),
@@ -245,28 +372,41 @@ func scanSource(ctx context.Context, js jetstream.JetStream, job natsclient.Job)
 	return stats, nil
 }
 
-func buildWorkMessage(token, fullPath string, info os.FileInfo) natsclient.WorkMessage {
+func buildWorkMessage(relativePath string, info os.FileInfo) natsclient.WorkMessage {
 	mode := info.Mode()
+	inode, ctime := fileStatMetadata(info)
 
 	return natsclient.WorkMessage{
-		Token:     token,
-		Path:      fullPath,
+		Path:      relativePath,
 		Name:      info.Name(),
+		Type:      modeToType(mode),
+		Inode:     inode,
 		Mode:      uint32(mode),
 		Size:      info.Size(),
-		ModTime:   info.ModTime().UTC(),
-		IsDir:     info.IsDir(),
-		IsSymlink: mode&os.ModeSymlink != 0,
+		CTime:     ctime,
+		MTime:     info.ModTime().Unix(),
 	}
 }
 
-func workQueueLimitWarning() string {
-	if natsclient.WorkQueueMaxMsgs <= 0 {
-		return ""
+func modeToType(m fs.FileMode) uint8 {
+	t := m.Type()
+	switch {
+	case t == 0:
+		return natsclient.TypeFile
+	case t&fs.ModeDir != 0:
+		return natsclient.TypeDir
+	case t&fs.ModeSymlink != 0:
+		return natsclient.TypeSymlink
+	case t&fs.ModeDevice != 0 && t&fs.ModeCharDevice != 0:
+		return natsclient.TypeCharDev
+	case t&fs.ModeDevice != 0:
+		return natsclient.TypeDevice
+	case t&fs.ModeNamedPipe != 0:
+		return natsclient.TypePipe
+	case t&fs.ModeSocket != 0:
+		return natsclient.TypeSocket
+	default:
+		return natsclient.TypeUnknown
 	}
-
-	return fmt.Sprintf(
-		"DISCOVERY and WORK currently cap backlog at %d messages each; for very large directories, keep downstream consumers running or raise the stream limit.",
-		natsclient.WorkQueueMaxMsgs,
-	)
 }
+

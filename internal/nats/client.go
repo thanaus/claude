@@ -25,12 +25,12 @@ type JetStreamSession struct {
 // OpenJetStream connects to NATS and returns a ready-to-use JetStream session.
 func OpenJetStream(ctx context.Context, cfg config.NATSConfig) (*JetStreamSession, error) {
 	url := strings.TrimSpace(cfg.URL)
-	nc, opCtx, cancel, err := connect(ctx, cfg)
+	nc, probeCtx, cancel, err := connect(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("cannot connect to NATS server %q: %w", url, err)
 	}
 
-	if err := nc.FlushWithContext(opCtx); err != nil {
+	if err := nc.FlushWithContext(probeCtx); err != nil {
 		nc.Close()
 		if cancel != nil {
 			cancel()
@@ -55,7 +55,7 @@ func OpenJetStream(ctx context.Context, cfg config.NATSConfig) (*JetStreamSessio
 		return nil, fmt.Errorf("connected to NATS server %q but JetStream is unavailable: %w", url, err)
 	}
 
-	if _, err := js.AccountInfo(opCtx); err != nil {
+	if _, err := js.AccountInfo(probeCtx); err != nil {
 		nc.Close()
 		if cancel != nil {
 			cancel()
@@ -67,7 +67,7 @@ func OpenJetStream(ctx context.Context, cfg config.NATSConfig) (*JetStreamSessio
 		URL:       url,
 		Conn:      nc,
 		JetStream: js,
-		Context:   opCtx,
+		Context:   ctx,
 		cancel:    cancel,
 	}, nil
 }

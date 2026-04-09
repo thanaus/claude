@@ -11,18 +11,27 @@ import (
 
 const rootDiscoveryKind = "root"
 
+const (
+	TypeUnknown uint8 = iota
+	TypeFile
+	TypeDir
+	TypeSymlink
+	TypeCharDev
+	TypeDevice
+	TypePipe
+	TypeSocket
+)
+
 // DiscoveryMessage seeds the discovery stream for a job.
 type DiscoveryMessage struct {
-	Token     string    `json:"token"`
 	Path      string    `json:"path"`
 	Kind      string    `json:"kind"`
 	StartedAt time.Time `json:"startedAt"`
 }
 
 // NewRootDiscoveryMessage builds the initial discovery payload for a job.
-func NewRootDiscoveryMessage(token, path string, startedAt time.Time) DiscoveryMessage {
+func NewRootDiscoveryMessage(path string, startedAt time.Time) DiscoveryMessage {
 	return DiscoveryMessage{
-		Token:     token,
 		Path:      path,
 		Kind:      rootDiscoveryKind,
 		StartedAt: startedAt,
@@ -31,14 +40,14 @@ func NewRootDiscoveryMessage(token, path string, startedAt time.Time) DiscoveryM
 
 // WorkMessage contains the metadata published for each discovered entry.
 type WorkMessage struct {
-	Token     string    `json:"token"`
 	Path      string    `json:"path"`
 	Name      string    `json:"name"`
+	Type      uint8     `json:"type"`
+	Inode     uint64    `json:"inode"`
 	Mode      uint32    `json:"mode"`
 	Size      int64     `json:"size"`
-	ModTime   time.Time `json:"modTime"`
-	IsDir     bool      `json:"isDir"`
-	IsSymlink bool      `json:"isSymlink"`
+	CTime     int64     `json:"ctime"`
+	MTime     int64     `json:"mtime"`
 }
 
 // PublishJSON serializes a payload and publishes it to JetStream.
