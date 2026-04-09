@@ -44,8 +44,22 @@ No files are transferred during this step.`,
 
 func newSyncRunE(svc syncservice.Service) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
-		source := args[0]
-		destination := args[1]
+		source, _, err := validator.ResolveExistingDir(args[0])
+		if err != nil {
+			return runtimeError(
+				"Failed to resolve source directory before creating the sync job.",
+				"Ensure the source directory still exists and is accessible from the local filesystem.",
+				err,
+			)
+		}
+		destination, _, err := validator.ResolveExistingDir(args[1])
+		if err != nil {
+			return runtimeError(
+				"Failed to resolve destination directory before creating the sync job.",
+				"Ensure the destination directory still exists and is accessible from the local filesystem.",
+				err,
+			)
+		}
 		natsCfg, _ := config.NATSConfigFromContext(cmd.Context())
 
 		result, err := svc.Provision(cmd.Context(), syncservice.Input{
