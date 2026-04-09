@@ -69,7 +69,7 @@ func (Provisioner) Provision(ctx context.Context, cfg config.NATSConfig, source,
 	}
 	result.Streams = streams
 
-	kv, bucket, err := EnsureBucket(provisionCtx, js)
+	kv, bucket, err := EnsureJobsBucket(provisionCtx, js)
 	if err != nil {
 		return result, err
 	}
@@ -81,14 +81,15 @@ func (Provisioner) Provision(ctx context.Context, cfg config.NATSConfig, source,
 			return result, fmt.Errorf("cannot generate sync token: %w", err)
 		}
 
-		job := SyncJob{
-			Token:         token,
-			Source:        source,
-			Destination:   destination,
-			FilesSubject:  FilesSubject(token),
-			StatusSubject: StatusSubject(token),
-			State:         "active",
-			CreatedAt:     time.Now().UTC(),
+		job := Job{
+			Token:             token,
+			Source:            source,
+			Destination:       destination,
+			DiscoverySubject:  DiscoverySubject(token),
+			WorkSubject:       WorkSubject(token),
+			MonitoringSubject: MonitoringSubject(token),
+			State:             "active",
+			CreatedAt:         time.Now().UTC(),
 		}
 
 		jobStatus, err := SaveJob(provisionCtx, kv, job)

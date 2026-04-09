@@ -11,18 +11,24 @@ import (
 )
 
 const (
-	filesStreamName  = "SYNC_FILES"
-	statusStreamName = "SYNC_STATUS"
+	discoveryStreamName  = "DISCOVERY"
+	workStreamName       = "WORK"
+	monitoringStreamName = "MONITORING"
 )
 
-// FilesSubject returns the subject prefix used to store file events for a job.
-func FilesSubject(token string) string {
-	return fmt.Sprintf("sync.files.%s", token)
+// DiscoverySubject returns the subject prefix used to store discovery work for a job.
+func DiscoverySubject(token string) string {
+	return fmt.Sprintf("sync.discovery.%s", token)
 }
 
-// StatusSubject returns the subject prefix used to store status events for a job.
-func StatusSubject(token string) string {
-	return fmt.Sprintf("sync.status.%s", token)
+// WorkSubject returns the subject prefix used to store execution work for a job.
+func WorkSubject(token string) string {
+	return fmt.Sprintf("sync.work.%s", token)
+}
+
+// MonitoringSubject returns the subject prefix used to store monitoring events for a job.
+func MonitoringSubject(token string) string {
+	return fmt.Sprintf("sync.monitoring.%s", token)
 }
 
 // ResourceStatus describes the provisioning status of a NATS resource.
@@ -33,8 +39,8 @@ type ResourceStatus struct {
 
 var streamConfigs = []jetstream.StreamConfig{
 	{
-		Name:      filesStreamName,
-		Subjects:  []string{"sync.files.>"},
+		Name:      discoveryStreamName,
+		Subjects:  []string{"sync.discovery.>"},
 		Retention: jetstream.WorkQueuePolicy,
 		Storage:   jetstream.FileStorage,
 		Replicas:  1,
@@ -43,8 +49,18 @@ var streamConfigs = []jetstream.StreamConfig{
 		Discard:   jetstream.DiscardOld,
 	},
 	{
-		Name:      statusStreamName,
-		Subjects:  []string{"sync.status.>"},
+		Name:      workStreamName,
+		Subjects:  []string{"sync.work.>"},
+		Retention: jetstream.WorkQueuePolicy,
+		Storage:   jetstream.FileStorage,
+		Replicas:  1,
+		MaxAge:    24 * time.Hour,
+		MaxMsgs:   500_000,
+		Discard:   jetstream.DiscardOld,
+	},
+	{
+		Name:      monitoringStreamName,
+		Subjects:  []string{"sync.monitoring.>"},
 		Retention: jetstream.InterestPolicy,
 		Storage:   jetstream.MemoryStorage,
 		Replicas:  1,

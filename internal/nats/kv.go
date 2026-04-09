@@ -10,21 +10,22 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 )
 
-const jobsBucketName = "sync_jobs"
+const jobsBucketName = "jobs"
 
-// SyncJob stores the metadata required to operate a synchronization job.
-type SyncJob struct {
-	Token         string    `json:"token"`
-	Source        string    `json:"source"`
-	Destination   string    `json:"destination"`
-	FilesSubject  string    `json:"filesSubject"`
-	StatusSubject string  `json:"statusSubject"`
-	State         string    `json:"state"`
-	CreatedAt     time.Time `json:"createdAt"`
+// Job stores the metadata required to operate a job.
+type Job struct {
+	Token             string    `json:"token"`
+	Source            string    `json:"source"`
+	Destination       string    `json:"destination"`
+	DiscoverySubject  string    `json:"discoverySubject"`
+	WorkSubject       string    `json:"workSubject"`
+	MonitoringSubject string    `json:"monitoringSubject"`
+	State             string    `json:"state"`
+	CreatedAt         time.Time `json:"createdAt"`
 }
 
-// EnsureBucket creates the KV bucket required to store sync job metadata.
-func EnsureBucket(ctx context.Context, js jetstream.JetStream) (jetstream.KeyValue, ResourceStatus, error) {
+// EnsureJobsBucket creates the KV bucket required to store job metadata.
+func EnsureJobsBucket(ctx context.Context, js jetstream.JetStream) (jetstream.KeyValue, ResourceStatus, error) {
 	kv, err := js.KeyValue(ctx, jobsBucketName)
 	switch {
 	case err == nil:
@@ -32,7 +33,7 @@ func EnsureBucket(ctx context.Context, js jetstream.JetStream) (jetstream.KeyVal
 	case errors.Is(err, jetstream.ErrBucketNotFound):
 		kv, err := js.CreateOrUpdateKeyValue(ctx, jetstream.KeyValueConfig{
 			Bucket:      jobsBucketName,
-			Description: "Synchronization job metadata",
+			Description: "Job metadata",
 			Storage:     jetstream.FileStorage,
 			Replicas:    1,
 		})
@@ -45,18 +46,18 @@ func EnsureBucket(ctx context.Context, js jetstream.JetStream) (jetstream.KeyVal
 	}
 }
 
-// SaveJob stores a sync job in the KV bucket.
-func SaveJob(ctx context.Context, kv jetstream.KeyValue, job SyncJob) (ResourceStatus, error) {
+// SaveJob stores a job in the KV bucket.
+func SaveJob(ctx context.Context, kv jetstream.KeyValue, job Job) (ResourceStatus, error) {
 	payload, err := json.Marshal(job)
 	if err != nil {
-		return ResourceStatus{}, fmt.Errorf("cannot encode sync job %q: %w", job.Token, err)
+		return ResourceStatus{}, fmt.Errorf("cannot encode job %q: %w", job.Token, err)
 	}
 
 	if _, err := kv.Create(ctx, job.Token, payload); err != nil {
 		if errors.Is(err, jetstream.ErrKeyExists) {
-			return ResourceStatus{}, fmt.Errorf("sync job token %q already exists: %w", job.Token, err)
+			return ResourceStatus{}, fmt.Errorf("job token %q already exists: %w", job.Token, err)
 		}
-		return ResourceStatus{}, fmt.Errorf("cannot store sync job %q: %w", job.Token, err)
+		return ResourceStatus{}, fmt.Errorf("cannot store job %q: %w", job.Token, err)
 	}
 
 	return ResourceStatus{Name: job.Token, Status: "created"}, nil
