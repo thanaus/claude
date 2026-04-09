@@ -5,10 +5,12 @@ import (
 
 	"github.com/nexus/nexus/internal/app"
 	"github.com/nexus/nexus/internal/cli/validator"
+	"github.com/nexus/nexus/internal/config"
+	lsservice "github.com/nexus/nexus/internal/service/ls"
 	"github.com/spf13/cobra"
 )
 
-func NewLSCmd() *cobra.Command {
+func NewLSCmd(svc lsservice.Service) *cobra.Command {
 	lsCmd := &cobra.Command{
 		Use:     "ls <token>",
 		GroupID: groupCore,
@@ -23,40 +25,51 @@ Workers can then consume these messages to perform synchronization.`,
 			fmt.Sprintf("Create a sync job first to obtain a token\nRun '%s sync <source> <destination>'", app.Name),
 			"<token>",
 		),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			token := args[0]
-
-			outputFmt, _ := cmd.Flags().GetString("output")
-			filter, _ := cmd.Flags().GetString("filter")
-			limit, _ := cmd.Flags().GetInt("limit")
-			verbose, _ := cmd.Flags().GetCount("verbose")
-
-			if verbose >= 1 {
-				fmt.Printf("[verbose:%d] token=%s output=%s filter=%s limit=%d\n",
-					verbose, token, outputFmt, filter, limit)
-			}
-
-			fmt.Printf("Listing resources for token: %s\n", token)
-			if filter != "" {
-				fmt.Printf("  Filter: %s\n", filter)
-			}
-			if limit > 0 {
-				fmt.Printf("  Limit:  %d results\n", limit)
-			}
-			// TODO: implement business logic + output formatting (table/json)
-			return nil
-		},
 	}
 
 	v := validator.New().Add(
+		validator.ValidateNATSConfig(
+			fmt.Sprintf("Define a valid NATS configuration before running the listing workflow.\nCheck %s and, if set, %s.", app.NATSURLEnv, app.NATSProbeTimeoutEnv),
+		),
 		validator.ValidateOutputFormat(),
 		validator.ValidateLimit(),
 	)
 
 	lsCmd.PreRunE = v.PreRunE()
+	lsCmd.RunE = newLSRunE(svc)
 	lsCmd.Flags().StringP("output", "o", "table", "Output format: table, json")
 	lsCmd.Flags().StringP("filter", "f", "", "Filter resources by name (e.g. api, worker)")
 	lsCmd.Flags().IntP("limit", "l", 0, "Maximum number of results (0 = no limit)")
 
 	return lsCmd
+}
+
+func newLSRunE(svc lsservice.Service) func(*cobra.Command, []string) error {
+	return func(cmd *cobra.Command, args []string) error {
+		token := args[0]
+		natsCfg, _ := config.NATSConfigFromContext(cmd.Context())
+
+		result, err := svc.Run(cmd.Context(), lsservice.Input{
+			Token: token,
+		})
+		if err != nil {
+			return runtimeError(
+				fmt.Sprintf("Failed to initialize ls prerequisites: %s", natsCfg.URL),
+				fmt.Sprintf("Ensure the NATS server is running, JetStream is enabled, and the KV bucket %q already exists.\nCreate a job first with '%s sync <source> <destination>'.", "jobs", app.Name),
+				err,
+			)
+		}
+
+		fmt.Println("✔ LS prerequisites ready")
+		fmt.Println()
+		fmt.Printf("%-14s %s\n", "Token:", token)
+		fmt.Println()
+		fmt.Printf("%-14s %s\n", "NATS:", result.URL)
+		fmt.Printf("%-14s %s\n", "JetStream:", jetStreamStatus(result.JetStreamReady))
+		fmt.Println()
+		fmt.Println("Resources:")
+		fmt.Printf("  %-21s %s %s\n", "KV "+result.KeyValue.Name, "✔", resourceDisplayStatus(result.KeyValue.Status))
+
+		return nil
+	}
 }

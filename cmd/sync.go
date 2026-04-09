@@ -64,20 +64,20 @@ func newSyncRunE(svc syncservice.Service) func(*cobra.Command, []string) error {
 		fmt.Println()
 		fmt.Printf("%-14s %s\n", "Source:", source)
 		fmt.Printf("%-14s %s\n", "Destination:", destination)
-		fmt.Printf("%-14s %s\n", "Token:", result.NATS.Token)
+		fmt.Printf("%-14s %s\n", "Token:", result.Token)
 		fmt.Println()
-		fmt.Printf("%-14s %s\n", "NATS:", result.NATS.URL)
-		fmt.Printf("%-14s %s\n", "JetStream:", jetStreamStatus(result.NATS.JetStreamReady))
+		fmt.Printf("%-14s %s\n", "NATS:", result.URL)
+		fmt.Printf("%-14s %s\n", "JetStream:", jetStreamStatus(result.JetStreamReady))
 		fmt.Println()
 		fmt.Println("Resources:")
-		for _, stream := range result.NATS.Streams {
+		for _, stream := range result.Streams {
 			fmt.Printf("  %-21s %s %s\n", "Stream "+stream.Name, "✔", resourceDisplayStatus(stream.Status))
 		}
-		fmt.Printf("  %-21s %s %s\n", "KV "+result.NATS.KeyValue.Name, "✔", resourceDisplayStatus(result.NATS.KeyValue.Status))
+		fmt.Printf("  %-21s %s %s\n", "KV "+result.KeyValue.Name, "✔", resourceDisplayStatus(result.KeyValue.Status))
 		fmt.Println()
 		fmt.Println("Next steps:")
-		fmt.Printf("  %s ls %s\n", app.Name, result.NATS.Token)
-		fmt.Printf("  %s worker %s\n", app.Name, result.NATS.Token)
+		fmt.Printf("  %s ls %s\n", app.Name, result.Token)
+		fmt.Printf("  %s worker %s\n", app.Name, result.Token)
 
 		return nil
 	}

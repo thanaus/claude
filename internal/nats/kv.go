@@ -46,6 +46,19 @@ func EnsureJobsBucket(ctx context.Context, js jetstream.JetStream) (jetstream.Ke
 	}
 }
 
+// LookupJobsBucket checks that the jobs KV bucket already exists.
+func LookupJobsBucket(ctx context.Context, js jetstream.JetStream) (jetstream.KeyValue, ResourceStatus, error) {
+	kv, err := js.KeyValue(ctx, jobsBucketName)
+	switch {
+	case err == nil:
+		return kv, ResourceStatus{Name: jobsBucketName, Status: "ready"}, nil
+	case errors.Is(err, jetstream.ErrBucketNotFound):
+		return nil, ResourceStatus{}, fmt.Errorf("job KV bucket %q not found", jobsBucketName)
+	default:
+		return nil, ResourceStatus{}, fmt.Errorf("cannot inspect KV bucket %q: %w", jobsBucketName, err)
+	}
+}
+
 // SaveJob stores a job in the KV bucket.
 func SaveJob(ctx context.Context, kv jetstream.KeyValue, job Job) (ResourceStatus, error) {
 	payload, err := json.Marshal(job)

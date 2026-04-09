@@ -20,46 +20,94 @@ type ProbeResult struct {
 	JetStreamReady bool
 }
 
+// JetStreamSession wraps a ready-to-use NATS connection and JetStream handle.
+type JetStreamSession struct {
+	URL       string
+	Conn      *nats.Conn
+	JetStream jetstream.JetStream
+	Context   context.Context
+	cancel    context.CancelFunc
+}
+
 // Client probes a NATS server and validates that it can be used.
 type Client struct{}
 
-// Probe connects to NATS, verifies the server answers, and checks JetStream.
-func (Client) Probe(ctx context.Context, cfg config.NATSConfig) (ProbeResult, error) {
+// OpenJetStream connects to NATS and returns a ready-to-use JetStream session.
+func OpenJetStream(ctx context.Context, cfg config.NATSConfig) (*JetStreamSession, error) {
 	url := strings.TrimSpace(cfg.URL)
-	nc, probeCtx, cancel, err := connect(ctx, cfg)
+	nc, opCtx, cancel, err := connect(ctx, cfg)
 	if err != nil {
-		return ProbeResult{}, fmt.Errorf("cannot connect to NATS server %q: %w", url, err)
+		return nil, fmt.Errorf("cannot connect to NATS server %q: %w", url, err)
 	}
-	if cancel != nil {
-		defer cancel()
-	}
-	defer nc.Close()
 
-	if err := nc.FlushWithContext(probeCtx); err != nil {
-		return ProbeResult{}, fmt.Errorf("connected to NATS server %q but the connection is not usable: %w", url, err)
+	if err := nc.FlushWithContext(opCtx); err != nil {
+		nc.Close()
+		if cancel != nil {
+			cancel()
+		}
+		return nil, fmt.Errorf("connected to NATS server %q but the connection is not usable: %w", url, err)
 	}
 
 	if !nc.IsConnected() {
-		return ProbeResult{}, fmt.Errorf("connection to NATS server %q is not ready", url)
-	}
-
-	result := ProbeResult{
-		URL:           url,
-		NATSReachable: true,
+		nc.Close()
+		if cancel != nil {
+			cancel()
+		}
+		return nil, fmt.Errorf("connection to NATS server %q is not ready", url)
 	}
 
 	js, err := jetstream.New(nc)
 	if err != nil {
-		return result, fmt.Errorf("connected to NATS server %q but JetStream is unavailable: %w", url, err)
+		nc.Close()
+		if cancel != nil {
+			cancel()
+		}
+		return nil, fmt.Errorf("connected to NATS server %q but JetStream is unavailable: %w", url, err)
 	}
 
-	if _, err := js.AccountInfo(probeCtx); err != nil {
-		return result, fmt.Errorf("connected to NATS server %q but JetStream is not responding: %w", url, err)
+	if _, err := js.AccountInfo(opCtx); err != nil {
+		nc.Close()
+		if cancel != nil {
+			cancel()
+		}
+		return nil, fmt.Errorf("connected to NATS server %q but JetStream is not responding: %w", url, err)
 	}
 
-	result.JetStreamReady = true
+	return &JetStreamSession{
+		URL:       url,
+		Conn:      nc,
+		JetStream: js,
+		Context:   opCtx,
+		cancel:    cancel,
+	}, nil
+}
 
-	return result, nil
+// Close releases the resources owned by the JetStream session.
+func (s *JetStreamSession) Close() {
+	if s == nil {
+		return
+	}
+	if s.cancel != nil {
+		s.cancel()
+	}
+	if s.Conn != nil {
+		s.Conn.Close()
+	}
+}
+
+// Probe connects to NATS, verifies the server answers, and checks JetStream.
+func (Client) Probe(ctx context.Context, cfg config.NATSConfig) (ProbeResult, error) {
+	session, err := OpenJetStream(ctx, cfg)
+	if err != nil {
+		return ProbeResult{}, err
+	}
+	defer session.Close()
+
+	return ProbeResult{
+		URL:           session.URL,
+		NATSReachable: true,
+		JetStreamReady: true,
+	}, nil
 }
 
 func connect(ctx context.Context, cfg config.NATSConfig) (*nats.Conn, context.Context, context.CancelFunc, error) {

@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	natsclient "github.com/nexus/nexus/internal/nats"
+	lsservice "github.com/nexus/nexus/internal/service/ls"
 	syncservice "github.com/nexus/nexus/internal/service/sync"
 
 	"github.com/nexus/nexus/internal/app"
@@ -12,8 +12,8 @@ import (
 func NewRootCmd() *cobra.Command {
 	root := buildRootCmd()
 
-	root.AddCommand(NewSyncCmd(syncservice.New(natsclient.Provisioner{})))
-	root.AddCommand(NewLSCmd())
+	root.AddCommand(NewSyncCmd(syncservice.New()))
+	root.AddCommand(NewLSCmd(lsservice.New()))
 	root.AddCommand(NewWorkerCmd())
 	root.AddCommand(NewStatusCmd())
 	root.AddCommand(NewVersionCmd())
