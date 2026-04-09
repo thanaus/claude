@@ -29,32 +29,27 @@ const (
 
 // Input holds the parameters required by the ls use case.
 type Input struct {
-	Token    string
-	Reporter Reporter
-	Workers  int
+	Token   string
+	Sink    EventSink
+	Workers int
+}
+
+// Snapshot describes the stable workflow state known before scan counters change.
+type Snapshot struct {
+	URL                string
+	NATSReachable      bool
+	JetStreamReady     bool
+	KeyValue           natsclient.ResourceStatus
+	Job                natsclient.Job
+	DiscoveryPublished bool
 }
 
 // Result contains the outcome of the ls workflow.
 type Result struct {
-	URL                string
-	NATSReachable      bool
-	JetStreamReady     bool
-	KeyValue           natsclient.ResourceStatus
-	Job                natsclient.Job
-	DiscoveryPublished bool
-	DiscoveredEntries  uint64
-	PublishedWork      uint64
-	Errors             uint64
-}
-
-// Prepared describes the state of the job once prerequisites are validated.
-type Prepared struct {
-	URL                string
-	NATSReachable      bool
-	JetStreamReady     bool
-	KeyValue           natsclient.ResourceStatus
-	Job                natsclient.Job
-	DiscoveryPublished bool
+	Snapshot
+	DiscoveredEntries uint64
+	PublishedWork     uint64
+	Errors            uint64
 }
 
 // Progress reports intermediate scan counters while ls is running.
@@ -73,12 +68,6 @@ type scanStats struct {
 	Errors            uint64
 }
 
-// Reporter receives lifecycle callbacks for the ls workflow.
-type Reporter interface {
-	OnPrepared(Prepared)
-	OnProgress(Progress)
-}
-
 // New returns an ls service ready to run the listing workflow.
 func New() Service {
 	return Service{}
@@ -88,6 +77,11 @@ func New() Service {
 func (s Service) Run(ctx context.Context, in Input) (Result, error) {
 	if in.Token == "" {
 		return Result{}, fmt.Errorf("missing job token")
+	}
+
+	sink := in.Sink
+	if sink == nil {
+		sink = NoOpSink{}
 	}
 
 	cfg, ok := config.NATSConfigFromContext(ctx)
@@ -112,11 +106,13 @@ func (s Service) Run(ctx context.Context, in Input) (Result, error) {
 	}
 
 	result := Result{
-		URL:            session.URL,
-		NATSReachable:  true,
-		JetStreamReady: true,
-		KeyValue:       bucket,
-		Job:            job,
+		Snapshot: Snapshot{
+			URL:            session.URL,
+			NATSReachable:  true,
+			JetStreamReady: true,
+			KeyValue:       bucket,
+			Job:            job,
+		},
 	}
 
 	startedAt := time.Now().UTC()
@@ -134,23 +130,14 @@ func (s Service) Run(ctx context.Context, in Input) (Result, error) {
 	}
 	result.Job = job
 
-	if in.Reporter != nil {
-		in.Reporter.OnPrepared(Prepared{
-			URL:                result.URL,
-			NATSReachable:      result.NATSReachable,
-			JetStreamReady:     result.JetStreamReady,
-			KeyValue:           result.KeyValue,
-			Job:                result.Job,
-			DiscoveryPublished: result.DiscoveryPublished,
-		})
-	}
+	sink.Emit(PreparedEvent{Snapshot: result.Snapshot})
 
 	workers := in.Workers
 	if workers <= 0 {
 		workers = defaultWorkerCount
 	}
 
-	stats, scanErr := scanSource(session.Context, session.JetStream, job, workers, in.Reporter)
+	stats, scanErr := scanSource(session.Context, session.JetStream, job, workers, sink)
 	result.DiscoveredEntries = stats.DiscoveredEntries
 	result.PublishedWork = stats.PublishedWork
 	result.Errors = stats.Errors
@@ -181,7 +168,7 @@ func (s Service) Run(ctx context.Context, in Input) (Result, error) {
 	return result, nil
 }
 
-func scanSource(ctx context.Context, js jetstream.JetStream, job natsclient.Job, workers int, reporter Reporter) (scanStats, error) {
+func scanSource(ctx context.Context, js jetstream.JetStream, job natsclient.Job, workers int, sink EventSink) (scanStats, error) {
 	scanCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -199,14 +186,11 @@ func scanSource(ctx context.Context, js jetstream.JetStream, job natsclient.Job,
 	progressDone := make(chan struct{})
 
 	reportProgress := func() {
-		if reporter == nil {
-			return
-		}
-		reporter.OnProgress(Progress{
+		sink.Emit(ProgressEvent{Progress: Progress{
 			DiscoveredEntries: discoveredEntries.Load(),
 			PublishedWork:     publishedWork.Load(),
 			Errors:            errorCount.Load(),
-		})
+		}})
 	}
 
 	setErr := func(err error) {
@@ -220,28 +204,26 @@ func scanSource(ctx context.Context, js jetstream.JetStream, job natsclient.Job,
 		})
 	}
 
-	if reporter != nil {
-		progressWG.Add(1)
-		go func() {
-			defer progressWG.Done()
+	progressWG.Add(1)
+	go func() {
+		defer progressWG.Done()
 
-			ticker := time.NewTicker(progressInterval)
-			defer ticker.Stop()
+		ticker := time.NewTicker(progressInterval)
+		defer ticker.Stop()
 
-			for {
-				select {
-				case <-progressDone:
-					reportProgress()
-					return
-				case <-scanCtx.Done():
-					reportProgress()
-					return
-				case <-ticker.C:
-					reportProgress()
-				}
+		for {
+			select {
+			case <-progressDone:
+				reportProgress()
+				return
+			case <-scanCtx.Done():
+				reportProgress()
+				return
+			case <-ticker.C:
+				reportProgress()
 			}
-		}()
-	}
+		}
+	}()
 
 	scanWG.Add(1)
 	go func() {

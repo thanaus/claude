@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/nexus/nexus/internal/app"
 	"github.com/nexus/nexus/internal/cli/validator"
@@ -49,15 +50,27 @@ func newLSRunE(svc lsservice.Service) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
 		token := args[0]
 		natsCfg, _ := config.NATSConfigFromContext(cmd.Context())
-		reporter := &lsCLIReporter{}
 		workers, _ := cmd.Flags().GetInt("workers")
+		events := make(chan lsservice.Event, 16)
+		renderer := &lsCLIRenderer{}
+
+		var renderWG sync.WaitGroup
+		renderWG.Add(1)
+		go func() {
+			defer renderWG.Done()
+			for event := range events {
+				renderer.handle(event)
+			}
+		}()
 
 		result, err := svc.Run(cmd.Context(), lsservice.Input{
-			Token:    token,
-			Reporter: reporter,
-			Workers:  workers,
+			Token:   token,
+			Sink:    chanSink{ch: events},
+			Workers: workers,
 		})
-		reporter.EndProgress()
+		close(events)
+		renderWG.Wait()
+		renderer.endProgress()
 		if err != nil {
 			return runtimeError(
 				fmt.Sprintf("Failed to run ls workflow: %s", natsCfg.URL),
@@ -72,15 +85,28 @@ func newLSRunE(svc lsservice.Service) func(*cobra.Command, []string) error {
 	}
 }
 
-type lsCLIReporter struct {
+type chanSink struct {
+	ch chan<- lsservice.Event
+}
+
+func (s chanSink) Emit(event lsservice.Event) {
+	s.ch <- event
+}
+
+type lsCLIRenderer struct {
 	progressActive bool
 }
 
-func (r *lsCLIReporter) OnPrepared(prepared lsservice.Prepared) {
-	printLSPrepared(prepared)
+func (r *lsCLIRenderer) handle(event lsservice.Event) {
+	switch e := event.(type) {
+	case lsservice.PreparedEvent:
+		printLSPrepared(e.Snapshot)
+	case lsservice.ProgressEvent:
+		r.renderProgress(e.Progress)
+	}
 }
 
-func (r *lsCLIReporter) OnProgress(progress lsservice.Progress) {
+func (r *lsCLIRenderer) renderProgress(progress lsservice.Progress) {
 	if r.progressActive {
 		clearProgressBlock()
 	}
@@ -92,7 +118,7 @@ func (r *lsCLIReporter) OnProgress(progress lsservice.Progress) {
 	r.progressActive = true
 }
 
-func (r *lsCLIReporter) EndProgress() {
+func (r *lsCLIRenderer) endProgress() {
 	if !r.progressActive {
 		return
 	}
@@ -118,19 +144,19 @@ func boolStatus(ok bool) string {
 	return "pending"
 }
 
-func printLSPrepared(prepared lsservice.Prepared) {
+func printLSPrepared(snapshot lsservice.Snapshot) {
 	fmt.Println("✔ Scan started")
 	fmt.Println()
-	fmt.Printf("%-14s %s\n", "Token:", prepared.Job.Token)
-	fmt.Printf("%-14s %s\n", "Source:", prepared.Job.Source)
-	fmt.Printf("%-14s %s\n", "State:", prepared.Job.State)
+	fmt.Printf("%-14s %s\n", "Token:", snapshot.Job.Token)
+	fmt.Printf("%-14s %s\n", "Source:", snapshot.Job.Source)
+	fmt.Printf("%-14s %s\n", "State:", snapshot.Job.State)
 	fmt.Println()
-	fmt.Printf("%-14s %s\n", "NATS:", prepared.URL)
-	fmt.Printf("%-14s %s\n", "JetStream:", jetStreamStatus(prepared.JetStreamReady))
+	fmt.Printf("%-14s %s\n", "NATS:", snapshot.URL)
+	fmt.Printf("%-14s %s\n", "JetStream:", jetStreamStatus(snapshot.JetStreamReady))
 	fmt.Println()
 	fmt.Println("Resources:")
-	fmt.Printf("  %-21s %s %s\n", "KV "+prepared.KeyValue.Name, "✔", resourceDisplayStatus(prepared.KeyValue.Status))
-	fmt.Printf("  %-21s %s %s\n", "DISCOVERY", "✔", boolStatus(prepared.DiscoveryPublished))
+	fmt.Printf("  %-21s %s %s\n", "KV "+snapshot.KeyValue.Name, "✔", resourceDisplayStatus(snapshot.KeyValue.Status))
+	fmt.Printf("  %-21s %s %s\n", "DISCOVERY", "✔", boolStatus(snapshot.DiscoveryPublished))
 	fmt.Println()
 }
 
