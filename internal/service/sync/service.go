@@ -2,11 +2,11 @@ package syncservice
 
 import (
 	"context"
-	"crypto/rand"
 	"errors"
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/nexus/nexus/internal/config"
 	natsclient "github.com/nexus/nexus/internal/nats"
 	"github.com/nats-io/nats.go/jetstream"
@@ -71,10 +71,7 @@ func (s Service) Provision(ctx context.Context, in Input) (Result, error) {
 	result.KeyValue = bucket
 
 	for attempt := 0; attempt < maxTokenCollisionRetries; attempt++ {
-		token, err := newToken()
-		if err != nil {
-			return Result{}, fmt.Errorf("cannot generate sync token: %w", err)
-		}
+		token := uuid.NewString()
 
 		job := natsclient.Job{
 			Token:             token,
@@ -99,16 +96,4 @@ func (s Service) Provision(ctx context.Context, in Input) (Result, error) {
 	}
 
 	return Result{}, fmt.Errorf("cannot allocate a unique sync token after %d attempts", maxTokenCollisionRetries)
-}
-
-func newToken() (string, error) {
-	var raw [16]byte
-	if _, err := rand.Read(raw[:]); err != nil {
-		return "", err
-	}
-
-	raw[6] = (raw[6] & 0x0f) | 0x40
-	raw[8] = (raw[8] & 0x3f) | 0x80
-
-	return fmt.Sprintf("%x-%x-%x-%x-%x", raw[0:4], raw[4:6], raw[6:8], raw[8:10], raw[10:16]), nil
 }

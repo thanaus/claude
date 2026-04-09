@@ -125,22 +125,9 @@ func exactArgs(hint string, names ...string) cobra.PositionalArgs {
 
 ---
 
-## Dette technique
-
-### 5. Double connexion NATS si probe + provision combinés
-
-**Fichiers :** `internal/nats/client.go`, `internal/nats/provisioner.go`
-**Sévérité :** Dette (non bloquant aujourd'hui)
-
-`Client.Probe()` et `Provisioner.Provision()` ouvrent chacun leur propre connexion NATS via `connect()`. Aujourd'hui `cmd/sync` n'utilise que `Provisioner`, donc une seule connexion est ouverte. Mais une future commande composant probe + provision créerait deux connexions séquentielles pour la même exécution.
-
-Le TECHDEBT.md documente ce point. La direction recommandée y est correcte : introduire un `NATSSession` ou `NATSHandle` interne partageable, que `Provision` accepte en paramètre plutôt qu'en créer un lui-même.
-
----
-
 ## Anticipations pour la suite
 
-### 6. `GetJob()` manquant pour `ls`, `worker`, `status`
+### 5. `GetJob()` manquant pour `ls`, `worker`, `status`
 
 **Fichier :** `internal/nats/kv.go`
 
@@ -164,19 +151,19 @@ func GetJob(ctx context.Context, kv jetstream.KeyValue, token string) (SyncJob, 
 }
 ```
 
-### 7. Accès au flag `--verbose` persistant
+### 6. Accès au flag `--verbose` persistant
 
 **Fichiers :** `cmd/ls.go`, `cmd/worker.go`, `cmd/status.go`
 
 `--verbose` est déclaré en `PersistentFlags` sur `root`, mais lu via `cmd.Flags().GetCount("verbose")` dans chaque `RunE`. Cobra résout les deux en pratique, mais l'accès explicite via `cmd.Root().PersistentFlags()` ou `cmd.InheritedFlags()` est plus lisible et évite toute ambiguïté à la lecture du code.
 
-### 8. Compatibilité des dépendances avec Go 1.26
+### 7. Compatibilité des dépendances avec Go 1.26
 
 **Fichier :** `go.mod`
 
 `cobra v1.10.2` et `nats.go v1.50.0` doivent être vérifiés contre le toolchain Go 1.26. Une v2 de Cobra a pu sortir dans l'intervalle — à contrôler avant d'implémenter les commandes suivantes.
 
-### 9. Absence de tests
+### 8. Absence de tests
 
 L'architecture actuelle (validators comme `Rule`, services injectés via interface) est naturellement testable. À prioriser avant d'implémenter les `RunE` métier des commandes `ls`, `worker` et `status`.
 
@@ -190,8 +177,7 @@ L'architecture actuelle (validators comme `Rule`, services injectés via interfa
 | 2 | Moyenne | `cmd/sync.go` | `natsCfg, _` ignore l'échec de contexte |
 | 3 | Moyenne | `internal/nats/streams.go` | `streamConfigMatches` incomplet → drift silencieux |
 | 4 | Faible | `cmd/ux.go` | `exactArgs()` sans noms : pas de garde-fou |
-| 5 | Dette | `internal/nats/*.go` | Double connexion NATS si probe + provision combinés |
-| 6 | Anticipation | `internal/nats/kv.go` | `GetJob()` manquant pour `ls` / `worker` / `status` |
-| 7 | Anticipation | `cmd/*.go` | Accès au flag `--verbose` persistant à clarifier |
-| 8 | Anticipation | `go.mod` | Compatibilité dépendances avec Go 1.26 à vérifier |
-| 9 | Anticipation | — | Absence de tests unitaires |
+| 5 | Anticipation | `internal/nats/kv.go` | `GetJob()` manquant pour `ls` / `worker` / `status` |
+| 6 | Anticipation | `cmd/*.go` | Accès au flag `--verbose` persistant à clarifier |
+| 7 | Anticipation | `go.mod` | Compatibilité dépendances avec Go 1.26 à vérifier |
+| 8 | Anticipation | — | Absence de tests unitaires |

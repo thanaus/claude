@@ -116,4 +116,3 @@ Exemples :
 - `internal/nats/kv.go` — accès au bucket `jobs`
 - `internal/service/sync/service.go` — orchestration du workflow `sync`
 - `internal/service/ls/service.go` — orchestration des prérequis `ls`
-- `TECHDEBT.md` — historique autour du cycle de vie des connexions NATS
