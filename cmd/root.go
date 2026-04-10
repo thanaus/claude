@@ -2,7 +2,9 @@ package cmd
 
 import (
 	lsservice "github.com/nexus/nexus/internal/service/ls"
+	statusservice "github.com/nexus/nexus/internal/service/status"
 	syncservice "github.com/nexus/nexus/internal/service/sync"
+	workerservice "github.com/nexus/nexus/internal/service/worker"
 
 	"github.com/nexus/nexus/internal/app"
 	"github.com/spf13/cobra"
@@ -14,8 +16,8 @@ func NewRootCmd() *cobra.Command {
 
 	root.AddCommand(NewSyncCmd(syncservice.New()))
 	root.AddCommand(NewLSCmd(lsservice.New()))
-	root.AddCommand(NewWorkerCmd())
-	root.AddCommand(NewStatusCmd())
+	root.AddCommand(NewWorkerCmd(workerservice.New()))
+	root.AddCommand(NewStatusCmd(statusservice.New()))
 	root.AddCommand(NewVersionCmd())
 
 	return root

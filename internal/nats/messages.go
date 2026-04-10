@@ -50,6 +50,26 @@ type WorkMessage struct {
 	MTime     int64     `json:"mtime"`
 }
 
+// MonitoringMessage carries live scan counters for the status watch mode.
+type MonitoringMessage struct {
+	Phase             string    `json:"phase,omitempty"`
+	State             string    `json:"state"`
+	StartedAt         time.Time `json:"startedAt"`
+	UpdatedAt         time.Time `json:"updatedAt"`
+	DiscoveredEntries uint64    `json:"discoveredEntries"`
+	DiscoveredBytes   uint64    `json:"discoveredBytes"`
+	PublishedWork     uint64    `json:"publishedWork"`
+	WorkerProcessedDelta uint64 `json:"workerProcessedDelta,omitempty"`
+	WorkerToCopyDelta    uint64 `json:"workerToCopyDelta,omitempty"`
+	WorkerOKDelta        uint64 `json:"workerOKDelta,omitempty"`
+	WorkerErrorsDelta    uint64 `json:"workerErrorsDelta,omitempty"`
+	WorkerProcessed   uint64    `json:"workerProcessed,omitempty"`
+	WorkerToCopy      uint64    `json:"workerToCopy,omitempty"`
+	WorkerOK          uint64    `json:"workerOK,omitempty"`
+	WorkerErrors      uint64    `json:"workerErrors,omitempty"`
+	Errors            uint64    `json:"errors"`
+}
+
 // PublishJSON serializes a payload and publishes it to JetStream.
 func PublishJSON(ctx context.Context, js jetstream.JetStream, subject string, payload any) error {
 	data, err := json.Marshal(payload)

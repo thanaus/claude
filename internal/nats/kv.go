@@ -32,7 +32,12 @@ type Job struct {
 	StartedAt         *time.Time `json:"startedAt,omitempty"`
 	UpdatedAt         *time.Time `json:"updatedAt,omitempty"`
 	DiscoveredEntries uint64    `json:"discoveredEntries,omitempty"`
+	DiscoveredBytes   uint64    `json:"discoveredBytes,omitempty"`
 	PublishedWork     uint64    `json:"publishedWork,omitempty"`
+	WorkerProcessed   uint64    `json:"workerProcessed,omitempty"`
+	WorkerToCopy      uint64    `json:"workerToCopy,omitempty"`
+	WorkerOK          uint64    `json:"workerOK,omitempty"`
+	WorkerErrors      uint64    `json:"workerErrors,omitempty"`
 	Errors            uint64    `json:"errors,omitempty"`
 }
 

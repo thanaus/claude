@@ -48,6 +48,7 @@ type Snapshot struct {
 type Result struct {
 	Snapshot
 	DiscoveredEntries uint64
+	DiscoveredBytes   uint64
 	PublishedWork     uint64
 	Errors            uint64
 }
@@ -55,6 +56,7 @@ type Result struct {
 // Progress reports intermediate scan counters while ls is running.
 type Progress struct {
 	DiscoveredEntries uint64
+	DiscoveredBytes   uint64
 	PublishedWork     uint64
 	Errors            uint64
 }
@@ -64,6 +66,7 @@ type Service struct{}
 
 type scanStats struct {
 	DiscoveredEntries uint64
+	DiscoveredBytes   uint64
 	PublishedWork     uint64
 	Errors            uint64
 }
@@ -125,6 +128,10 @@ func (s Service) Run(ctx context.Context, in Input) (Result, error) {
 	job.State = natsclient.JobStateRunning
 	job.StartedAt = &startedAt
 	job.UpdatedAt = &startedAt
+	job.DiscoveredEntries = 0
+	job.DiscoveredBytes = 0
+	job.PublishedWork = 0
+	job.Errors = 0
 	if _, err := natsclient.UpdateJob(session.Context, kv, job); err != nil {
 		return result, err
 	}
@@ -139,11 +146,13 @@ func (s Service) Run(ctx context.Context, in Input) (Result, error) {
 
 	stats, scanErr := scanSource(session.Context, session.JetStream, job, workers, sink)
 	result.DiscoveredEntries = stats.DiscoveredEntries
+	result.DiscoveredBytes = stats.DiscoveredBytes
 	result.PublishedWork = stats.PublishedWork
 	result.Errors = stats.Errors
 
 	finishedAt := time.Now().UTC()
 	job.DiscoveredEntries = stats.DiscoveredEntries
+	job.DiscoveredBytes = stats.DiscoveredBytes
 	job.PublishedWork = stats.PublishedWork
 	job.Errors = stats.Errors
 	job.UpdatedAt = &finishedAt
@@ -158,6 +167,22 @@ func (s Service) Run(ctx context.Context, in Input) (Result, error) {
 			return result, fmt.Errorf("%w; additionally failed to persist final job state: %v", scanErr, err)
 		}
 		return result, err
+	}
+
+	if job.StartedAt != nil {
+		monitoringMessage := natsclient.MonitoringMessage{
+			Phase:             "scan",
+			State:             job.State,
+			StartedAt:         job.StartedAt.UTC(),
+			UpdatedAt:         finishedAt,
+			DiscoveredEntries: stats.DiscoveredEntries,
+			DiscoveredBytes:   stats.DiscoveredBytes,
+			PublishedWork:     stats.PublishedWork,
+			Errors:            stats.Errors,
+		}
+		if err := natsclient.PublishJSON(session.Context, session.JetStream, job.MonitoringSubject, monitoringMessage); err != nil && scanErr == nil {
+			return result, err
+		}
 	}
 
 	result.Job = job
@@ -176,6 +201,7 @@ func scanSource(ctx context.Context, js jetstream.JetStream, job natsclient.Job,
 	resultsCh := make(chan natsclient.WorkMessage, entryBufferSize)
 
 	var discoveredEntries atomic.Uint64
+	var discoveredBytes atomic.Uint64
 	var publishedWork atomic.Uint64
 	var errorCount atomic.Uint64
 	var firstErr error
@@ -184,14 +210,6 @@ func scanSource(ctx context.Context, js jetstream.JetStream, job natsclient.Job,
 	var publishWG sync.WaitGroup
 	var progressWG sync.WaitGroup
 	progressDone := make(chan struct{})
-
-	reportProgress := func() {
-		sink.Emit(ProgressEvent{Progress: Progress{
-			DiscoveredEntries: discoveredEntries.Load(),
-			PublishedWork:     publishedWork.Load(),
-			Errors:            errorCount.Load(),
-		}})
-	}
 
 	setFatalErr := func(err error) {
 		if err == nil {
@@ -206,6 +224,30 @@ func scanSource(ctx context.Context, js jetstream.JetStream, job natsclient.Job,
 
 	recordEntryErr := func(error) {
 		errorCount.Add(1)
+	}
+
+	reportProgress := func() {
+		updatedAt := time.Now().UTC()
+		progress := Progress{
+			DiscoveredEntries: discoveredEntries.Load(),
+			DiscoveredBytes:   discoveredBytes.Load(),
+			PublishedWork:     publishedWork.Load(),
+			Errors:            errorCount.Load(),
+		}
+		sink.Emit(ProgressEvent{Progress: progress})
+		message := natsclient.MonitoringMessage{
+			Phase:             "scan",
+			State:             natsclient.JobStateRunning,
+			StartedAt:         job.StartedAt.UTC(),
+			UpdatedAt:         updatedAt,
+			DiscoveredEntries: progress.DiscoveredEntries,
+			DiscoveredBytes:   progress.DiscoveredBytes,
+			PublishedWork:     progress.PublishedWork,
+			Errors:            progress.Errors,
+		}
+		if err := natsclient.PublishJSON(scanCtx, js, job.MonitoringSubject, message); err != nil && scanCtx.Err() == nil {
+			setFatalErr(err)
+		}
 	}
 
 	progressWG.Add(1)
@@ -285,6 +327,7 @@ func scanSource(ctx context.Context, js jetstream.JetStream, job natsclient.Job,
 						recordEntryErr(fmt.Errorf("cannot stat entry %q: %w", fullPath, err))
 						continue
 					}
+					discoveredBytes.Add(statSizeBytes(info))
 
 					relativePath, err := filepath.Rel(job.Source, fullPath)
 					if err != nil {
@@ -346,6 +389,7 @@ func scanSource(ctx context.Context, js jetstream.JetStream, job natsclient.Job,
 
 	stats := scanStats{
 		DiscoveredEntries: discoveredEntries.Load(),
+		DiscoveredBytes:   discoveredBytes.Load(),
 		PublishedWork:     publishedWork.Load(),
 		Errors:            errorCount.Load(),
 	}
@@ -370,6 +414,15 @@ func buildWorkMessage(relativePath string, info os.FileInfo) natsclient.WorkMess
 		CTime:     ctime,
 		MTime:     info.ModTime().Unix(),
 	}
+}
+
+func statSizeBytes(info os.FileInfo) uint64 {
+	size := info.Size()
+	if size <= 0 {
+		return 0
+	}
+
+	return uint64(size)
 }
 
 func modeToType(m fs.FileMode) uint8 {

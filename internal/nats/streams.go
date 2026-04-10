@@ -15,6 +15,7 @@ const (
 	workStreamName       = "WORK"
 	monitoringStreamName = "MONITORING"
 	WorkQueueMaxMsgs     = 500_000
+	WorkStreamName       = workStreamName
 )
 
 // DiscoverySubject returns the subject prefix used to store discovery work for a job.
