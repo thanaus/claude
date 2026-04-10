@@ -5,9 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -15,6 +13,8 @@ import (
 
 	"github.com/nats-io/nats.go/jetstream"
 	"github.com/nexus/nexus/internal/config"
+	internalfs "github.com/nexus/nexus/internal/fs"
+	"github.com/nexus/nexus/internal/monitoring"
 	natsclient "github.com/nexus/nexus/internal/nats"
 )
 
@@ -24,7 +24,6 @@ const (
 	workerFetchWait      = time.Second
 	workerConsumerPrefix = "worker"
 	workerBufferSize     = 256
-	workerProgressPeriod = time.Second
 	workerKVUpdateRetries = 5
 )
 
@@ -45,6 +44,8 @@ type Result struct {
 	WorkerCopyCTime   uint64
 	WorkerOK        uint64
 	WorkerErrors    uint64
+	WorkerLStatNanos uint64
+	WorkerCopyNanos  uint64
 }
 
 // Service orchestrates the worker workflow.
@@ -119,6 +120,8 @@ func (s Service) Run(ctx context.Context, in Input) (Result, error) {
 	var toCopyCTimeCount atomic.Uint64
 	var okCount atomic.Uint64
 	var workerErrorCount atomic.Uint64
+	var workerLStatNanos atomic.Uint64
+	var workerCopyNanos atomic.Uint64
 	var firstErr error
 	var firstErrOnce sync.Once
 	var fetchWG sync.WaitGroup
@@ -133,6 +136,8 @@ func (s Service) Run(ctx context.Context, in Input) (Result, error) {
 	var lastPublishedToCopyCTime uint64
 	var lastPublishedOK uint64
 	var lastPublishedErrors uint64
+	var lastPublishedLStatNanos uint64
+	var lastPublishedCopyNanos uint64
 
 	setFatalErr := func(err error) {
 		if err == nil {
@@ -155,6 +160,8 @@ func (s Service) Run(ctx context.Context, in Input) (Result, error) {
 			WorkerCopyCTime:   toCopyCTimeCount.Load(),
 			WorkerOK:        okCount.Load(),
 			WorkerErrors:    workerErrorCount.Load(),
+			WorkerLStatNanos: workerLStatNanos.Load(),
+			WorkerCopyNanos:  workerCopyNanos.Load(),
 		}
 	}
 
@@ -170,6 +177,8 @@ func (s Service) Run(ctx context.Context, in Input) (Result, error) {
 			WorkerCopyCTime:   current.WorkerCopyCTime - lastPublishedToCopyCTime,
 			WorkerOK:        current.WorkerOK - lastPublishedOK,
 			WorkerErrors:    current.WorkerErrors - lastPublishedErrors,
+			WorkerLStatNanos: current.WorkerLStatNanos - lastPublishedLStatNanos,
+			WorkerCopyNanos:  current.WorkerCopyNanos - lastPublishedCopyNanos,
 		}
 		if delta.WorkerProcessed == 0 &&
 			delta.WorkerToCopy == 0 &&
@@ -178,7 +187,9 @@ func (s Service) Run(ctx context.Context, in Input) (Result, error) {
 			delta.WorkerCopyMTime == 0 &&
 			delta.WorkerCopyCTime == 0 &&
 			delta.WorkerOK == 0 &&
-			delta.WorkerErrors == 0 {
+			delta.WorkerErrors == 0 &&
+			delta.WorkerLStatNanos == 0 &&
+			delta.WorkerCopyNanos == 0 {
 			return
 		}
 		lastPublishedProcessed = current.WorkerProcessed
@@ -189,6 +200,8 @@ func (s Service) Run(ctx context.Context, in Input) (Result, error) {
 		lastPublishedToCopyCTime = current.WorkerCopyCTime
 		lastPublishedOK = current.WorkerOK
 		lastPublishedErrors = current.WorkerErrors
+		lastPublishedLStatNanos = current.WorkerLStatNanos
+		lastPublishedCopyNanos = current.WorkerCopyNanos
 
 		if err := publishWorkerMonitoring(workerCtx, session.JetStream, job, delta); err != nil && workerCtx.Err() == nil {
 			setFatalErr(err)
@@ -199,7 +212,7 @@ func (s Service) Run(ctx context.Context, in Input) (Result, error) {
 	go func() {
 		defer progressWG.Done()
 
-		ticker := time.NewTicker(workerProgressPeriod)
+		ticker := time.NewTicker(monitoring.UpdateInterval)
 		defer ticker.Stop()
 
 		for {
@@ -292,29 +305,40 @@ func (s Service) Run(ctx context.Context, in Input) (Result, error) {
 						return
 					}
 
-					classification, compareErr := compareDestination(job.Destination, item.work)
+					entry := workEntry(item.work)
+					lstatStartedAt := time.Now()
+					classification, compareErr := internalfs.CompareDestination(job.Destination, entry)
+					workerLStatNanos.Add(uint64(time.Since(lstatStartedAt)))
 					processedCount.Add(1)
 
 					switch {
 					case compareErr == nil:
 						switch classification {
-						case comparisonMissing:
-							compareErr = copyWorkEntry(job.Source, job.Destination, item.work)
+						case internalfs.ComparisonMissing:
+							copyStartedAt := time.Now()
+							compareErr = internalfs.CopyEntry(job.Source, job.Destination, entry)
+							workerCopyNanos.Add(uint64(time.Since(copyStartedAt)))
 							toCopyCount.Add(1)
 							toCopyMissingCount.Add(1)
-						case comparisonSize:
-							compareErr = copyWorkEntry(job.Source, job.Destination, item.work)
+						case internalfs.ComparisonSize:
+							copyStartedAt := time.Now()
+							compareErr = internalfs.CopyEntry(job.Source, job.Destination, entry)
+							workerCopyNanos.Add(uint64(time.Since(copyStartedAt)))
 							toCopyCount.Add(1)
 							toCopySizeCount.Add(1)
-						case comparisonMTime:
-							compareErr = copyWorkEntry(job.Source, job.Destination, item.work)
+						case internalfs.ComparisonMTime:
+							copyStartedAt := time.Now()
+							compareErr = internalfs.CopyEntry(job.Source, job.Destination, entry)
+							workerCopyNanos.Add(uint64(time.Since(copyStartedAt)))
 							toCopyCount.Add(1)
 							toCopyMTimeCount.Add(1)
-						case comparisonCTime:
-							compareErr = copyWorkEntry(job.Source, job.Destination, item.work)
+						case internalfs.ComparisonCTime:
+							copyStartedAt := time.Now()
+							compareErr = internalfs.CopyEntry(job.Source, job.Destination, entry)
+							workerCopyNanos.Add(uint64(time.Since(copyStartedAt)))
 							toCopyCount.Add(1)
 							toCopyCTimeCount.Add(1)
-						case comparisonOK:
+						case internalfs.ComparisonOK:
 							okCount.Add(1)
 						}
 						if compareErr != nil {
@@ -357,97 +381,6 @@ func (s Service) Run(ctx context.Context, in Input) (Result, error) {
 	return result, nil
 }
 
-type destinationComparison uint8
-
-const (
-	comparisonUnknown destinationComparison = iota
-	comparisonOK
-	comparisonMissing
-	comparisonSize
-	comparisonMTime
-	comparisonCTime
-)
-
-func compareDestination(root string, work natsclient.WorkMessage) (destinationComparison, error) {
-	fullPath := filepath.Join(root, work.Path)
-	info, err := os.Lstat(fullPath)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return comparisonMissing, nil
-		}
-		return comparisonUnknown, fmt.Errorf("cannot stat destination entry %q: %w", fullPath, err)
-	}
-
-	_, ctime := fileStatMetadata(info)
-	switch {
-	case info.Size() != work.Size:
-		return comparisonSize, nil
-	case info.ModTime().Unix() != work.MTime:
-		return comparisonMTime, nil
-	case work.CTime > ctime:
-		return comparisonCTime, nil
-	}
-
-	return comparisonOK, nil
-}
-
-func copyWorkEntry(sourceRoot, destinationRoot string, work natsclient.WorkMessage) error {
-	sourcePath := filepath.Join(sourceRoot, work.Path)
-	destinationPath := filepath.Join(destinationRoot, work.Path)
-
-	if err := os.MkdirAll(filepath.Dir(destinationPath), 0o755); err != nil {
-		return fmt.Errorf("cannot create destination parent for %q: %w", destinationPath, err)
-	}
-
-	switch work.Type {
-	case natsclient.TypeFile:
-		return copyFile(sourcePath, destinationPath)
-	case natsclient.TypeDir:
-		if err := os.MkdirAll(destinationPath, os.FileMode(work.Mode).Perm()); err != nil {
-			return fmt.Errorf("cannot create destination directory %q: %w", destinationPath, err)
-		}
-		info, err := os.Stat(sourcePath)
-		if err != nil {
-			return fmt.Errorf("cannot stat source directory %q: %w", sourcePath, err)
-		}
-		return copyEntryMetadata(sourcePath, destinationPath, info)
-	default:
-		return fmt.Errorf("cannot copy unsupported entry type %d for %q", work.Type, work.Path)
-	}
-}
-
-func copyFile(sourcePath, destinationPath string) error {
-	src, err := os.Open(sourcePath)
-	if err != nil {
-		return fmt.Errorf("cannot open source file %q: %w", sourcePath, err)
-	}
-	defer src.Close()
-
-	info, err := src.Stat()
-	if err != nil {
-		return fmt.Errorf("cannot stat source file %q: %w", sourcePath, err)
-	}
-
-	dst, err := os.Create(destinationPath)
-	if err != nil {
-		return fmt.Errorf("cannot create destination file %q: %w", destinationPath, err)
-	}
-
-	if _, err := io.Copy(dst, src); err != nil {
-		_ = dst.Close()
-		return fmt.Errorf("cannot copy file %q to %q: %w", sourcePath, destinationPath, err)
-	}
-	if err := dst.Close(); err != nil {
-		return fmt.Errorf("cannot close destination file %q: %w", destinationPath, err)
-	}
-
-	if err := copyEntryMetadata(sourcePath, destinationPath, info); err != nil {
-		return err
-	}
-
-	return nil
-}
-
 func publishWorkerMonitoring(ctx context.Context, js jetstream.JetStream, job natsclient.Job, result Result) error {
 	startedAt := time.Now().UTC()
 	if job.StartedAt != nil {
@@ -470,6 +403,8 @@ func publishWorkerMonitoring(ctx context.Context, js jetstream.JetStream, job na
 		WorkerCopyCTimeDelta:   result.WorkerCopyCTime,
 		WorkerOKDelta:         result.WorkerOK,
 		WorkerErrorsDelta:     result.WorkerErrors,
+		WorkerLStatNanosDelta: result.WorkerLStatNanos,
+		WorkerCopyNanosDelta:  result.WorkerCopyNanos,
 		WorkerProcessed:       result.WorkerProcessed,
 		WorkerToCopy:          result.WorkerToCopy,
 		WorkerCopyMissing:     result.WorkerCopyMissing,
@@ -478,8 +413,44 @@ func publishWorkerMonitoring(ctx context.Context, js jetstream.JetStream, job na
 		WorkerCopyCTime:       result.WorkerCopyCTime,
 		WorkerOK:              result.WorkerOK,
 		WorkerErrors:          result.WorkerErrors,
+		WorkerLStatNanos:      result.WorkerLStatNanos,
+		WorkerCopyNanos:       result.WorkerCopyNanos,
 		Errors:                job.Errors,
 	})
+}
+
+func workEntry(work natsclient.WorkMessage) internalfs.Entry {
+	return internalfs.Entry{
+		Path:  work.Path,
+		Name:  work.Name,
+		Type:  natTypeToEntryType(work.Type),
+		Inode: work.Inode,
+		Mode:  work.Mode,
+		Size:  work.Size,
+		CTime: work.CTime,
+		MTime: work.MTime,
+	}
+}
+
+func natTypeToEntryType(t uint8) internalfs.EntryType {
+	switch t {
+	case natsclient.TypeFile:
+		return internalfs.TypeFile
+	case natsclient.TypeDir:
+		return internalfs.TypeDir
+	case natsclient.TypeSymlink:
+		return internalfs.TypeSymlink
+	case natsclient.TypeCharDev:
+		return internalfs.TypeCharDev
+	case natsclient.TypeDevice:
+		return internalfs.TypeDevice
+	case natsclient.TypePipe:
+		return internalfs.TypePipe
+	case natsclient.TypeSocket:
+		return internalfs.TypeSocket
+	default:
+		return internalfs.TypeUnknown
+	}
 }
 
 func accumulateWorkerTotals(ctx context.Context, kv jetstream.KeyValue, job natsclient.Job, delta Result) (natsclient.Job, error) {
@@ -505,6 +476,8 @@ func accumulateWorkerTotals(ctx context.Context, kv jetstream.KeyValue, job nats
 		latest.WorkerCopyCTime += delta.WorkerCopyCTime
 		latest.WorkerOK += delta.WorkerOK
 		latest.WorkerErrors += delta.WorkerErrors
+		latest.WorkerLStatNanos += delta.WorkerLStatNanos
+		latest.WorkerCopyNanos += delta.WorkerCopyNanos
 
 		payload, err := json.Marshal(latest)
 		if err != nil {

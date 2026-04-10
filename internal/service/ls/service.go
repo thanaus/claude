@@ -4,27 +4,22 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
-	"io"
-	"os"
-	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	natsclient "github.com/nexus/nexus/internal/nats"
 	"github.com/nexus/nexus/internal/config"
+	internalfs "github.com/nexus/nexus/internal/fs"
+	"github.com/nexus/nexus/internal/monitoring"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
 const (
-	readDirBatchSize = 1024
-	defaultWorkerCount = 4
 	defaultPublisherCount = 4
 	entryBufferSize  = 4096
 	publishMaxRetries = 5
 	publishRetryBase  = 100 * time.Millisecond
-	progressInterval = time.Second
 )
 
 // Input holds the parameters required by the ls use case.
@@ -139,12 +134,7 @@ func (s Service) Run(ctx context.Context, in Input) (Result, error) {
 
 	sink.Emit(PreparedEvent{Snapshot: result.Snapshot})
 
-	workers := in.Workers
-	if workers <= 0 {
-		workers = defaultWorkerCount
-	}
-
-	stats, scanErr := scanSource(session.Context, session.JetStream, job, workers, sink)
+	stats, scanErr := scanSource(session.Context, session.JetStream, job, sink)
 	result.DiscoveredEntries = stats.DiscoveredEntries
 	result.DiscoveredBytes = stats.DiscoveredBytes
 	result.PublishedWork = stats.PublishedWork
@@ -193,11 +183,10 @@ func (s Service) Run(ctx context.Context, in Input) (Result, error) {
 	return result, nil
 }
 
-func scanSource(ctx context.Context, js jetstream.JetStream, job natsclient.Job, workers int, sink EventSink) (scanStats, error) {
+func scanSource(ctx context.Context, js jetstream.JetStream, job natsclient.Job, sink EventSink) (scanStats, error) {
 	scanCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	entriesCh := make(chan os.DirEntry, entryBufferSize)
 	resultsCh := make(chan natsclient.WorkMessage, entryBufferSize)
 
 	var discoveredEntries atomic.Uint64
@@ -206,7 +195,6 @@ func scanSource(ctx context.Context, js jetstream.JetStream, job natsclient.Job,
 	var errorCount atomic.Uint64
 	var firstErr error
 	var firstErrOnce sync.Once
-	var statWG sync.WaitGroup
 	var publishWG sync.WaitGroup
 	var progressWG sync.WaitGroup
 	progressDone := make(chan struct{})
@@ -220,10 +208,6 @@ func scanSource(ctx context.Context, js jetstream.JetStream, job natsclient.Job,
 			errorCount.Add(1)
 			cancel()
 		})
-	}
-
-	recordEntryErr := func(error) {
-		errorCount.Add(1)
 	}
 
 	reportProgress := func() {
@@ -254,7 +238,7 @@ func scanSource(ctx context.Context, js jetstream.JetStream, job natsclient.Job,
 	go func() {
 		defer progressWG.Done()
 
-		ticker := time.NewTicker(progressInterval)
+		ticker := time.NewTicker(monitoring.UpdateInterval)
 		defer ticker.Stop()
 
 		for {
@@ -269,86 +253,6 @@ func scanSource(ctx context.Context, js jetstream.JetStream, job natsclient.Job,
 				reportProgress()
 			}
 		}
-	}()
-
-	go func() {
-		defer close(entriesCh)
-
-		f, err := os.Open(job.Source)
-		if err != nil {
-			setFatalErr(fmt.Errorf("cannot open source directory %q: %w", job.Source, err))
-			return
-		}
-		defer f.Close()
-
-		for {
-			if scanCtx.Err() != nil {
-				return
-			}
-
-			entries, err := f.ReadDir(readDirBatchSize)
-			if err != nil && !errors.Is(err, io.EOF) {
-				setFatalErr(fmt.Errorf("cannot read source directory %q: %w", job.Source, err))
-				return
-			}
-
-			for _, entry := range entries {
-				select {
-				case <-scanCtx.Done():
-					return
-				case entriesCh <- entry:
-					discoveredEntries.Add(1)
-				}
-			}
-
-			if errors.Is(err, io.EOF) {
-				return
-			}
-		}
-	}()
-
-	for range workers {
-		statWG.Add(1)
-		go func() {
-			defer statWG.Done()
-
-			for {
-				select {
-				case <-scanCtx.Done():
-					return
-				case entry, ok := <-entriesCh:
-					if !ok {
-						return
-					}
-
-					fullPath := filepath.Join(job.Source, entry.Name())
-					info, err := os.Lstat(fullPath)
-					if err != nil {
-						recordEntryErr(fmt.Errorf("cannot stat entry %q: %w", fullPath, err))
-						continue
-					}
-					discoveredBytes.Add(statSizeBytes(info))
-
-					relativePath, err := filepath.Rel(job.Source, fullPath)
-					if err != nil {
-						setFatalErr(fmt.Errorf("cannot derive relative path for %q from source %q: %w", fullPath, job.Source, err))
-						return
-					}
-
-					message := buildWorkMessage(relativePath, info)
-					select {
-					case <-scanCtx.Done():
-						return
-					case resultsCh <- message:
-					}
-				}
-			}
-		}()
-	}
-
-	go func() {
-		statWG.Wait()
-		close(resultsCh)
 	}()
 
 	for range defaultPublisherCount {
@@ -383,6 +287,24 @@ func scanSource(ctx context.Context, js jetstream.JetStream, job natsclient.Job,
 		}()
 	}
 
+	if _, scanErr := internalfs.Scan(scanCtx, job.Source, func(entry internalfs.Entry) error {
+		discoveredEntries.Add(1)
+		if entry.Size > 0 {
+			discoveredBytes.Add(uint64(entry.Size))
+		}
+
+		message := buildWorkMessage(entry)
+		select {
+		case <-scanCtx.Done():
+			return scanCtx.Err()
+		case resultsCh <- message:
+			return nil
+		}
+	}); scanErr != nil && !errors.Is(scanErr, context.Canceled) {
+		setFatalErr(scanErr)
+	}
+
+	close(resultsCh)
 	publishWG.Wait()
 	close(progressDone)
 	progressWG.Wait()
@@ -400,47 +322,34 @@ func scanSource(ctx context.Context, js jetstream.JetStream, job natsclient.Job,
 	return stats, nil
 }
 
-func buildWorkMessage(relativePath string, info os.FileInfo) natsclient.WorkMessage {
-	mode := info.Mode()
-	inode, ctime := fileStatMetadata(info)
-
+func buildWorkMessage(entry internalfs.Entry) natsclient.WorkMessage {
 	return natsclient.WorkMessage{
-		Path:      relativePath,
-		Name:      info.Name(),
-		Type:      modeToType(mode),
-		Inode:     inode,
-		Mode:      uint32(mode),
-		Size:      info.Size(),
-		CTime:     ctime,
-		MTime:     info.ModTime().Unix(),
+		Path:      entry.Path,
+		Name:      entry.Name,
+		Type:      entryTypeToNATSType(entry.Type),
+		Inode:     entry.Inode,
+		Mode:      entry.Mode,
+		Size:      entry.Size,
+		CTime:     entry.CTime,
+		MTime:     entry.MTime,
 	}
 }
 
-func statSizeBytes(info os.FileInfo) uint64 {
-	size := info.Size()
-	if size <= 0 {
-		return 0
-	}
-
-	return uint64(size)
-}
-
-func modeToType(m fs.FileMode) uint8 {
-	t := m.Type()
+func entryTypeToNATSType(t internalfs.EntryType) uint8 {
 	switch {
-	case t == 0:
+	case t == internalfs.TypeFile:
 		return natsclient.TypeFile
-	case t&fs.ModeDir != 0:
+	case t == internalfs.TypeDir:
 		return natsclient.TypeDir
-	case t&fs.ModeSymlink != 0:
+	case t == internalfs.TypeSymlink:
 		return natsclient.TypeSymlink
-	case t&fs.ModeDevice != 0 && t&fs.ModeCharDevice != 0:
+	case t == internalfs.TypeCharDev:
 		return natsclient.TypeCharDev
-	case t&fs.ModeDevice != 0:
+	case t == internalfs.TypeDevice:
 		return natsclient.TypeDevice
-	case t&fs.ModeNamedPipe != 0:
+	case t == internalfs.TypePipe:
 		return natsclient.TypePipe
-	case t&fs.ModeSocket != 0:
+	case t == internalfs.TypeSocket:
 		return natsclient.TypeSocket
 	default:
 		return natsclient.TypeUnknown

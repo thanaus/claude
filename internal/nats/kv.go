@@ -42,6 +42,8 @@ type Job struct {
 	WorkerCopyCTime   uint64    `json:"workerCopyCtime,omitempty"`
 	WorkerOK          uint64    `json:"workerOK,omitempty"`
 	WorkerErrors      uint64    `json:"workerErrors,omitempty"`
+	WorkerLStatNanos  uint64    `json:"workerLstatNanos,omitempty"`
+	WorkerCopyNanos   uint64    `json:"workerCopyNanos,omitempty"`
 	Errors            uint64    `json:"errors,omitempty"`
 }
 

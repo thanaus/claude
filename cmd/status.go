@@ -10,13 +10,12 @@ import (
 	"github.com/nexus/nexus/internal/cli/output"
 	"github.com/nexus/nexus/internal/cli/validator"
 	"github.com/nexus/nexus/internal/config"
+	"github.com/nexus/nexus/internal/monitoring"
 	natsclient "github.com/nexus/nexus/internal/nats"
 	statusservice "github.com/nexus/nexus/internal/service/status"
 	"github.com/nats-io/nats.go"
 	"github.com/spf13/cobra"
 )
-
-const statusWatchInterval = time.Second
 
 func NewStatusCmd(svc statusservice.Service) *cobra.Command {
 	statusCmd := &cobra.Command{
@@ -95,7 +94,7 @@ func watchStatus(cmd *cobra.Command, svc statusservice.Service, token string, fo
 	}
 	defer sub.Unsubscribe()
 
-	ticker := time.NewTicker(statusWatchInterval)
+	ticker := time.NewTicker(monitoring.UpdateInterval)
 	defer ticker.Stop()
 
 	first := true
@@ -147,7 +146,7 @@ func watchStatus(cmd *cobra.Command, svc statusservice.Service, token string, fo
 }
 
 func pollStatus(cmd *cobra.Command, svc statusservice.Service, token string, format output.Format, natsCfg config.NATSConfig) error {
-	ticker := time.NewTicker(statusWatchInterval)
+	ticker := time.NewTicker(monitoring.UpdateInterval)
 	defer ticker.Stop()
 
 	first := true
@@ -218,6 +217,8 @@ func printStatusTable(result statusservice.Result) {
 	fmt.Printf("  %-21s %d\n", "CTime newer src", result.Job.WorkerCopyCTime)
 	fmt.Printf("  %-21s %d\n", "Already OK", result.Job.WorkerOK)
 	fmt.Printf("  %-21s %d\n", "Errors", result.Job.WorkerErrors)
+	fmt.Printf("  %-21s %s\n", "LStat time", formatOptionalDuration(time.Duration(result.Job.WorkerLStatNanos), true))
+	fmt.Printf("  %-21s %s\n", "Copy time", formatOptionalDuration(time.Duration(result.Job.WorkerCopyNanos), true))
 	fmt.Println()
 	fmt.Println("Derived metrics:")
 	fmt.Printf("  %-21s %s\n", "Elapsed", formatOptionalDuration(result.Metrics.Elapsed, result.Job.StartedAt != nil))
@@ -253,6 +254,8 @@ func printStatusJSON(result statusservice.Result) error {
 		WorkerCopyCTime:   result.Job.WorkerCopyCTime,
 		WorkerOK:          result.Job.WorkerOK,
 		WorkerErrors:      result.Job.WorkerErrors,
+		WorkerLStatNanos:  result.Job.WorkerLStatNanos,
+		WorkerCopyNanos:   result.Job.WorkerCopyNanos,
 		Errors:            result.Job.Errors,
 		Metrics: statusJSONMetrics{
 			ElapsedSeconds:   optionalSeconds(result.Metrics.Elapsed, result.Job.StartedAt != nil),
@@ -262,6 +265,8 @@ func printStatusJSON(result statusservice.Result) error {
 			DiscoveryRate:    optionalFloat(result.Metrics.DiscoveryRate, result.Metrics.Elapsed > 0),
 			WorkerRate:       optionalFloat(result.Metrics.WorkerRate, result.Metrics.Elapsed > 0),
 			WorkerInstantRate: optionalFloat(result.Metrics.WorkerInstantRate, result.Metrics.WorkerInstantRateAvailable),
+			WorkerLStatSeconds: optionalSeconds(time.Duration(result.Job.WorkerLStatNanos), true),
+			WorkerCopySeconds:  optionalSeconds(time.Duration(result.Job.WorkerCopyNanos), true),
 			ErrorRate:        optionalFloat(result.Metrics.ErrorRate, result.Job.DiscoveredEntries > 0),
 			PublishedPercent: optionalFloat(result.Metrics.PublishedPercent, result.Job.DiscoveredEntries > 0),
 		},
@@ -379,6 +384,8 @@ type statusJSONOutput struct {
 	WorkerCopyCTime   uint64                    `json:"workerCopyCtime"`
 	WorkerOK          uint64                    `json:"workerOK"`
 	WorkerErrors      uint64                    `json:"workerErrors"`
+	WorkerLStatNanos  uint64                    `json:"workerLstatNanos"`
+	WorkerCopyNanos   uint64                    `json:"workerCopyNanos"`
 	Errors            uint64                    `json:"errors"`
 	Metrics           statusJSONMetrics         `json:"metrics"`
 	CollectedAt       time.Time                 `json:"collectedAt"`
@@ -392,6 +399,8 @@ type statusJSONMetrics struct {
 	DiscoveryRate     *float64 `json:"discoveryRate,omitempty"`
 	WorkerRate        *float64 `json:"workerRate,omitempty"`
 	WorkerInstantRate *float64 `json:"workerInstantRate,omitempty"`
+	WorkerLStatSeconds *float64 `json:"workerLstatSeconds,omitempty"`
+	WorkerCopySeconds  *float64 `json:"workerCopySeconds,omitempty"`
 	ErrorRate         *float64 `json:"errorRate,omitempty"`
 	PublishedPercent  *float64 `json:"publishedPercent,omitempty"`
 }

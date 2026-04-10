@@ -67,6 +67,8 @@ type MonitoringMessage struct {
 	WorkerCopyCTimeDelta   uint64 `json:"workerCopyCtimeDelta,omitempty"`
 	WorkerOKDelta        uint64 `json:"workerOKDelta,omitempty"`
 	WorkerErrorsDelta    uint64 `json:"workerErrorsDelta,omitempty"`
+	WorkerLStatNanosDelta uint64 `json:"workerLstatNanosDelta,omitempty"`
+	WorkerCopyNanosDelta  uint64 `json:"workerCopyNanosDelta,omitempty"`
 	WorkerProcessed   uint64    `json:"workerProcessed,omitempty"`
 	WorkerToCopy      uint64    `json:"workerToCopy,omitempty"`
 	WorkerCopyMissing uint64    `json:"workerCopyMissing,omitempty"`
@@ -75,6 +77,8 @@ type MonitoringMessage struct {
 	WorkerCopyCTime   uint64    `json:"workerCopyCtime,omitempty"`
 	WorkerOK          uint64    `json:"workerOK,omitempty"`
 	WorkerErrors      uint64    `json:"workerErrors,omitempty"`
+	WorkerLStatNanos  uint64    `json:"workerLstatNanos,omitempty"`
+	WorkerCopyNanos   uint64    `json:"workerCopyNanos,omitempty"`
 	Errors            uint64    `json:"errors"`
 }
 

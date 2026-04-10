@@ -136,6 +136,8 @@ func ApplyMonitoring(result Result, update natsclient.MonitoringMessage, now tim
 			result.Job.WorkerCopyCTime += update.WorkerCopyCTimeDelta
 			result.Job.WorkerOK += update.WorkerOKDelta
 			result.Job.WorkerErrors += update.WorkerErrorsDelta
+			result.Job.WorkerLStatNanos += update.WorkerLStatNanosDelta
+			result.Job.WorkerCopyNanos += update.WorkerCopyNanosDelta
 		} else {
 			result.Job.WorkerProcessed = update.WorkerProcessed
 			result.Job.WorkerToCopy = update.WorkerToCopy
@@ -145,6 +147,8 @@ func ApplyMonitoring(result Result, update natsclient.MonitoringMessage, now tim
 			result.Job.WorkerCopyCTime = update.WorkerCopyCTime
 			result.Job.WorkerOK = update.WorkerOK
 			result.Job.WorkerErrors = update.WorkerErrors
+			result.Job.WorkerLStatNanos = update.WorkerLStatNanos
+			result.Job.WorkerCopyNanos = update.WorkerCopyNanos
 		}
 		result.Job.Errors = update.Errors
 	case "scan":
@@ -166,6 +170,8 @@ func ApplyMonitoring(result Result, update natsclient.MonitoringMessage, now tim
 			result.Job.WorkerCopyCTime = update.WorkerCopyCTime
 			result.Job.WorkerOK = update.WorkerOK
 			result.Job.WorkerErrors = update.WorkerErrors
+			result.Job.WorkerLStatNanos = update.WorkerLStatNanos
+			result.Job.WorkerCopyNanos = update.WorkerCopyNanos
 		}
 	}
 
@@ -246,7 +252,9 @@ func hasWorkerDelta(update natsclient.MonitoringMessage) bool {
 		update.WorkerCopyMTimeDelta > 0 ||
 		update.WorkerCopyCTimeDelta > 0 ||
 		update.WorkerOKDelta > 0 ||
-		update.WorkerErrorsDelta > 0
+		update.WorkerErrorsDelta > 0 ||
+		update.WorkerLStatNanosDelta > 0 ||
+		update.WorkerCopyNanosDelta > 0
 }
 
 func hasWorkerTotals(update natsclient.MonitoringMessage) bool {
@@ -257,7 +265,9 @@ func hasWorkerTotals(update natsclient.MonitoringMessage) bool {
 		update.WorkerCopyMTime > 0 ||
 		update.WorkerCopyCTime > 0 ||
 		update.WorkerOK > 0 ||
-		update.WorkerErrors > 0
+		update.WorkerErrors > 0 ||
+		update.WorkerLStatNanos > 0 ||
+		update.WorkerCopyNanos > 0
 }
 
 func isTerminalState(state string) bool {
