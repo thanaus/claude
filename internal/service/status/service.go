@@ -127,14 +127,22 @@ func ApplyMonitoring(result Result, update natsclient.MonitoringMessage, now tim
 		if update.PublishedWork > 0 {
 			result.Job.PublishedWork = update.PublishedWork
 		}
-		if update.WorkerProcessedDelta > 0 || update.WorkerToCopyDelta > 0 || update.WorkerOKDelta > 0 || update.WorkerErrorsDelta > 0 {
+		if hasWorkerDelta(update) {
 			result.Job.WorkerProcessed += update.WorkerProcessedDelta
 			result.Job.WorkerToCopy += update.WorkerToCopyDelta
+			result.Job.WorkerCopyMissing += update.WorkerCopyMissingDelta
+			result.Job.WorkerCopySize += update.WorkerCopySizeDelta
+			result.Job.WorkerCopyMTime += update.WorkerCopyMTimeDelta
+			result.Job.WorkerCopyCTime += update.WorkerCopyCTimeDelta
 			result.Job.WorkerOK += update.WorkerOKDelta
 			result.Job.WorkerErrors += update.WorkerErrorsDelta
 		} else {
 			result.Job.WorkerProcessed = update.WorkerProcessed
 			result.Job.WorkerToCopy = update.WorkerToCopy
+			result.Job.WorkerCopyMissing = update.WorkerCopyMissing
+			result.Job.WorkerCopySize = update.WorkerCopySize
+			result.Job.WorkerCopyMTime = update.WorkerCopyMTime
+			result.Job.WorkerCopyCTime = update.WorkerCopyCTime
 			result.Job.WorkerOK = update.WorkerOK
 			result.Job.WorkerErrors = update.WorkerErrors
 		}
@@ -149,9 +157,13 @@ func ApplyMonitoring(result Result, update natsclient.MonitoringMessage, now tim
 		result.Job.DiscoveredBytes = update.DiscoveredBytes
 		result.Job.PublishedWork = update.PublishedWork
 		result.Job.Errors = update.Errors
-		if update.WorkerProcessed > 0 || update.WorkerToCopy > 0 || update.WorkerOK > 0 || update.WorkerErrors > 0 {
+		if hasWorkerTotals(update) {
 			result.Job.WorkerProcessed = update.WorkerProcessed
 			result.Job.WorkerToCopy = update.WorkerToCopy
+			result.Job.WorkerCopyMissing = update.WorkerCopyMissing
+			result.Job.WorkerCopySize = update.WorkerCopySize
+			result.Job.WorkerCopyMTime = update.WorkerCopyMTime
+			result.Job.WorkerCopyCTime = update.WorkerCopyCTime
 			result.Job.WorkerOK = update.WorkerOK
 			result.Job.WorkerErrors = update.WorkerErrors
 		}
@@ -224,6 +236,28 @@ func deriveInstantWorkerRate(previousUpdatedAt *time.Time, updatedAt time.Time, 
 	}
 
 	return float64(processedDelta) / elapsed.Seconds(), true
+}
+
+func hasWorkerDelta(update natsclient.MonitoringMessage) bool {
+	return update.WorkerProcessedDelta > 0 ||
+		update.WorkerToCopyDelta > 0 ||
+		update.WorkerCopyMissingDelta > 0 ||
+		update.WorkerCopySizeDelta > 0 ||
+		update.WorkerCopyMTimeDelta > 0 ||
+		update.WorkerCopyCTimeDelta > 0 ||
+		update.WorkerOKDelta > 0 ||
+		update.WorkerErrorsDelta > 0
+}
+
+func hasWorkerTotals(update natsclient.MonitoringMessage) bool {
+	return update.WorkerProcessed > 0 ||
+		update.WorkerToCopy > 0 ||
+		update.WorkerCopyMissing > 0 ||
+		update.WorkerCopySize > 0 ||
+		update.WorkerCopyMTime > 0 ||
+		update.WorkerCopyCTime > 0 ||
+		update.WorkerOK > 0 ||
+		update.WorkerErrors > 0
 }
 
 func isTerminalState(state string) bool {

@@ -61,10 +61,18 @@ type MonitoringMessage struct {
 	PublishedWork     uint64    `json:"publishedWork"`
 	WorkerProcessedDelta uint64 `json:"workerProcessedDelta,omitempty"`
 	WorkerToCopyDelta    uint64 `json:"workerToCopyDelta,omitempty"`
+	WorkerCopyMissingDelta uint64 `json:"workerCopyMissingDelta,omitempty"`
+	WorkerCopySizeDelta    uint64 `json:"workerCopySizeDelta,omitempty"`
+	WorkerCopyMTimeDelta   uint64 `json:"workerCopyMtimeDelta,omitempty"`
+	WorkerCopyCTimeDelta   uint64 `json:"workerCopyCtimeDelta,omitempty"`
 	WorkerOKDelta        uint64 `json:"workerOKDelta,omitempty"`
 	WorkerErrorsDelta    uint64 `json:"workerErrorsDelta,omitempty"`
 	WorkerProcessed   uint64    `json:"workerProcessed,omitempty"`
 	WorkerToCopy      uint64    `json:"workerToCopy,omitempty"`
+	WorkerCopyMissing uint64    `json:"workerCopyMissing,omitempty"`
+	WorkerCopySize    uint64    `json:"workerCopySize,omitempty"`
+	WorkerCopyMTime   uint64    `json:"workerCopyMtime,omitempty"`
+	WorkerCopyCTime   uint64    `json:"workerCopyCtime,omitempty"`
 	WorkerOK          uint64    `json:"workerOK,omitempty"`
 	WorkerErrors      uint64    `json:"workerErrors,omitempty"`
 	Errors            uint64    `json:"errors"`

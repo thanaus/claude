@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,6 +39,10 @@ type Result struct {
 	Job             natsclient.Job
 	WorkerProcessed uint64
 	WorkerToCopy    uint64
+	WorkerCopyMissing uint64
+	WorkerCopySize    uint64
+	WorkerCopyMTime   uint64
+	WorkerCopyCTime   uint64
 	WorkerOK        uint64
 	WorkerErrors    uint64
 }
@@ -108,6 +113,10 @@ func (s Service) Run(ctx context.Context, in Input) (Result, error) {
 
 	var processedCount atomic.Uint64
 	var toCopyCount atomic.Uint64
+	var toCopyMissingCount atomic.Uint64
+	var toCopySizeCount atomic.Uint64
+	var toCopyMTimeCount atomic.Uint64
+	var toCopyCTimeCount atomic.Uint64
 	var okCount atomic.Uint64
 	var workerErrorCount atomic.Uint64
 	var firstErr error
@@ -118,6 +127,10 @@ func (s Service) Run(ctx context.Context, in Input) (Result, error) {
 	progressDone := make(chan struct{})
 	var lastPublishedProcessed uint64
 	var lastPublishedToCopy uint64
+	var lastPublishedToCopyMissing uint64
+	var lastPublishedToCopySize uint64
+	var lastPublishedToCopyMTime uint64
+	var lastPublishedToCopyCTime uint64
 	var lastPublishedOK uint64
 	var lastPublishedErrors uint64
 
@@ -136,6 +149,10 @@ func (s Service) Run(ctx context.Context, in Input) (Result, error) {
 			Job:             job,
 			WorkerProcessed: processedCount.Load(),
 			WorkerToCopy:    toCopyCount.Load(),
+			WorkerCopyMissing: toCopyMissingCount.Load(),
+			WorkerCopySize:    toCopySizeCount.Load(),
+			WorkerCopyMTime:   toCopyMTimeCount.Load(),
+			WorkerCopyCTime:   toCopyCTimeCount.Load(),
 			WorkerOK:        okCount.Load(),
 			WorkerErrors:    workerErrorCount.Load(),
 		}
@@ -147,14 +164,29 @@ func (s Service) Run(ctx context.Context, in Input) (Result, error) {
 			Job:             job,
 			WorkerProcessed: current.WorkerProcessed - lastPublishedProcessed,
 			WorkerToCopy:    current.WorkerToCopy - lastPublishedToCopy,
+			WorkerCopyMissing: current.WorkerCopyMissing - lastPublishedToCopyMissing,
+			WorkerCopySize:    current.WorkerCopySize - lastPublishedToCopySize,
+			WorkerCopyMTime:   current.WorkerCopyMTime - lastPublishedToCopyMTime,
+			WorkerCopyCTime:   current.WorkerCopyCTime - lastPublishedToCopyCTime,
 			WorkerOK:        current.WorkerOK - lastPublishedOK,
 			WorkerErrors:    current.WorkerErrors - lastPublishedErrors,
 		}
-		if delta.WorkerProcessed == 0 && delta.WorkerToCopy == 0 && delta.WorkerOK == 0 && delta.WorkerErrors == 0 {
+		if delta.WorkerProcessed == 0 &&
+			delta.WorkerToCopy == 0 &&
+			delta.WorkerCopyMissing == 0 &&
+			delta.WorkerCopySize == 0 &&
+			delta.WorkerCopyMTime == 0 &&
+			delta.WorkerCopyCTime == 0 &&
+			delta.WorkerOK == 0 &&
+			delta.WorkerErrors == 0 {
 			return
 		}
 		lastPublishedProcessed = current.WorkerProcessed
 		lastPublishedToCopy = current.WorkerToCopy
+		lastPublishedToCopyMissing = current.WorkerCopyMissing
+		lastPublishedToCopySize = current.WorkerCopySize
+		lastPublishedToCopyMTime = current.WorkerCopyMTime
+		lastPublishedToCopyCTime = current.WorkerCopyCTime
 		lastPublishedOK = current.WorkerOK
 		lastPublishedErrors = current.WorkerErrors
 
@@ -266,21 +298,38 @@ func (s Service) Run(ctx context.Context, in Input) (Result, error) {
 					switch {
 					case compareErr == nil:
 						switch classification {
-						case comparisonToCopy:
+						case comparisonMissing:
+							compareErr = copyWorkEntry(job.Source, job.Destination, item.work)
 							toCopyCount.Add(1)
+							toCopyMissingCount.Add(1)
+						case comparisonSize:
+							compareErr = copyWorkEntry(job.Source, job.Destination, item.work)
+							toCopyCount.Add(1)
+							toCopySizeCount.Add(1)
+						case comparisonMTime:
+							compareErr = copyWorkEntry(job.Source, job.Destination, item.work)
+							toCopyCount.Add(1)
+							toCopyMTimeCount.Add(1)
+						case comparisonCTime:
+							compareErr = copyWorkEntry(job.Source, job.Destination, item.work)
+							toCopyCount.Add(1)
+							toCopyCTimeCount.Add(1)
 						case comparisonOK:
 							okCount.Add(1)
+						}
+						if compareErr != nil {
+							workerErrorCount.Add(1)
 						}
 					default:
 						workerErrorCount.Add(1)
 					}
 
-					if err := item.msg.Ack(); err != nil {
-						setFatalErr(fmt.Errorf("cannot ack work message for job %q: %w", job.Token, err))
-						return
-					}
 					if compareErr != nil {
 						setFatalErr(compareErr)
+						return
+					}
+					if err := item.msg.Ack(); err != nil {
+						setFatalErr(fmt.Errorf("cannot ack work message for job %q: %w", job.Token, err))
 						return
 					}
 				}
@@ -313,7 +362,10 @@ type destinationComparison uint8
 const (
 	comparisonUnknown destinationComparison = iota
 	comparisonOK
-	comparisonToCopy
+	comparisonMissing
+	comparisonSize
+	comparisonMTime
+	comparisonCTime
 )
 
 func compareDestination(root string, work natsclient.WorkMessage) (destinationComparison, error) {
@@ -321,17 +373,79 @@ func compareDestination(root string, work natsclient.WorkMessage) (destinationCo
 	info, err := os.Lstat(fullPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return comparisonToCopy, nil
+			return comparisonMissing, nil
 		}
 		return comparisonUnknown, fmt.Errorf("cannot stat destination entry %q: %w", fullPath, err)
 	}
 
 	_, ctime := fileStatMetadata(info)
-	if info.Size() != work.Size || info.ModTime().Unix() != work.MTime || ctime != work.CTime {
-		return comparisonToCopy, nil
+	switch {
+	case info.Size() != work.Size:
+		return comparisonSize, nil
+	case info.ModTime().Unix() != work.MTime:
+		return comparisonMTime, nil
+	case work.CTime > ctime:
+		return comparisonCTime, nil
 	}
 
 	return comparisonOK, nil
+}
+
+func copyWorkEntry(sourceRoot, destinationRoot string, work natsclient.WorkMessage) error {
+	sourcePath := filepath.Join(sourceRoot, work.Path)
+	destinationPath := filepath.Join(destinationRoot, work.Path)
+
+	if err := os.MkdirAll(filepath.Dir(destinationPath), 0o755); err != nil {
+		return fmt.Errorf("cannot create destination parent for %q: %w", destinationPath, err)
+	}
+
+	switch work.Type {
+	case natsclient.TypeFile:
+		return copyFile(sourcePath, destinationPath)
+	case natsclient.TypeDir:
+		if err := os.MkdirAll(destinationPath, os.FileMode(work.Mode).Perm()); err != nil {
+			return fmt.Errorf("cannot create destination directory %q: %w", destinationPath, err)
+		}
+		info, err := os.Stat(sourcePath)
+		if err != nil {
+			return fmt.Errorf("cannot stat source directory %q: %w", sourcePath, err)
+		}
+		return copyEntryMetadata(sourcePath, destinationPath, info)
+	default:
+		return fmt.Errorf("cannot copy unsupported entry type %d for %q", work.Type, work.Path)
+	}
+}
+
+func copyFile(sourcePath, destinationPath string) error {
+	src, err := os.Open(sourcePath)
+	if err != nil {
+		return fmt.Errorf("cannot open source file %q: %w", sourcePath, err)
+	}
+	defer src.Close()
+
+	info, err := src.Stat()
+	if err != nil {
+		return fmt.Errorf("cannot stat source file %q: %w", sourcePath, err)
+	}
+
+	dst, err := os.Create(destinationPath)
+	if err != nil {
+		return fmt.Errorf("cannot create destination file %q: %w", destinationPath, err)
+	}
+
+	if _, err := io.Copy(dst, src); err != nil {
+		_ = dst.Close()
+		return fmt.Errorf("cannot copy file %q to %q: %w", sourcePath, destinationPath, err)
+	}
+	if err := dst.Close(); err != nil {
+		return fmt.Errorf("cannot close destination file %q: %w", destinationPath, err)
+	}
+
+	if err := copyEntryMetadata(sourcePath, destinationPath, info); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func publishWorkerMonitoring(ctx context.Context, js jetstream.JetStream, job natsclient.Job, result Result) error {
@@ -348,15 +462,23 @@ func publishWorkerMonitoring(ctx context.Context, js jetstream.JetStream, job na
 		DiscoveredEntries: job.DiscoveredEntries,
 		DiscoveredBytes:   job.DiscoveredBytes,
 		PublishedWork:     job.PublishedWork,
-		WorkerProcessedDelta: result.WorkerProcessed,
-		WorkerToCopyDelta:    result.WorkerToCopy,
-		WorkerOKDelta:        result.WorkerOK,
-		WorkerErrorsDelta:    result.WorkerErrors,
-		WorkerProcessed:   result.WorkerProcessed,
-		WorkerToCopy:      result.WorkerToCopy,
-		WorkerOK:          result.WorkerOK,
-		WorkerErrors:      result.WorkerErrors,
-		Errors:            job.Errors,
+		WorkerProcessedDelta:  result.WorkerProcessed,
+		WorkerToCopyDelta:     result.WorkerToCopy,
+		WorkerCopyMissingDelta: result.WorkerCopyMissing,
+		WorkerCopySizeDelta:    result.WorkerCopySize,
+		WorkerCopyMTimeDelta:   result.WorkerCopyMTime,
+		WorkerCopyCTimeDelta:   result.WorkerCopyCTime,
+		WorkerOKDelta:         result.WorkerOK,
+		WorkerErrorsDelta:     result.WorkerErrors,
+		WorkerProcessed:       result.WorkerProcessed,
+		WorkerToCopy:          result.WorkerToCopy,
+		WorkerCopyMissing:     result.WorkerCopyMissing,
+		WorkerCopySize:        result.WorkerCopySize,
+		WorkerCopyMTime:       result.WorkerCopyMTime,
+		WorkerCopyCTime:       result.WorkerCopyCTime,
+		WorkerOK:              result.WorkerOK,
+		WorkerErrors:          result.WorkerErrors,
+		Errors:                job.Errors,
 	})
 }
 
@@ -377,6 +499,10 @@ func accumulateWorkerTotals(ctx context.Context, kv jetstream.KeyValue, job nats
 
 		latest.WorkerProcessed += delta.WorkerProcessed
 		latest.WorkerToCopy += delta.WorkerToCopy
+		latest.WorkerCopyMissing += delta.WorkerCopyMissing
+		latest.WorkerCopySize += delta.WorkerCopySize
+		latest.WorkerCopyMTime += delta.WorkerCopyMTime
+		latest.WorkerCopyCTime += delta.WorkerCopyCTime
 		latest.WorkerOK += delta.WorkerOK
 		latest.WorkerErrors += delta.WorkerErrors
 

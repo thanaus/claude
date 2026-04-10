@@ -36,6 +36,10 @@ type Job struct {
 	PublishedWork     uint64    `json:"publishedWork,omitempty"`
 	WorkerProcessed   uint64    `json:"workerProcessed,omitempty"`
 	WorkerToCopy      uint64    `json:"workerToCopy,omitempty"`
+	WorkerCopyMissing uint64    `json:"workerCopyMissing,omitempty"`
+	WorkerCopySize    uint64    `json:"workerCopySize,omitempty"`
+	WorkerCopyMTime   uint64    `json:"workerCopyMtime,omitempty"`
+	WorkerCopyCTime   uint64    `json:"workerCopyCtime,omitempty"`
 	WorkerOK          uint64    `json:"workerOK,omitempty"`
 	WorkerErrors      uint64    `json:"workerErrors,omitempty"`
 	Errors            uint64    `json:"errors,omitempty"`

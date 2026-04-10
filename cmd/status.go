@@ -212,6 +212,10 @@ func printStatusTable(result statusservice.Result) {
 	fmt.Printf("  %-21s %s\n", "Rate", formatOptionalRate(result.Metrics.WorkerRate, result.Metrics.Elapsed > 0))
 	fmt.Printf("  %-21s %s\n", "Instant rate", formatOptionalRate(result.Metrics.WorkerInstantRate, result.Metrics.WorkerInstantRateAvailable))
 	fmt.Printf("  %-21s %d\n", "To copy", result.Job.WorkerToCopy)
+	fmt.Printf("  %-21s %d\n", "Missing", result.Job.WorkerCopyMissing)
+	fmt.Printf("  %-21s %d\n", "Size mismatch", result.Job.WorkerCopySize)
+	fmt.Printf("  %-21s %d\n", "MTime mismatch", result.Job.WorkerCopyMTime)
+	fmt.Printf("  %-21s %d\n", "CTime newer src", result.Job.WorkerCopyCTime)
 	fmt.Printf("  %-21s %d\n", "Already OK", result.Job.WorkerOK)
 	fmt.Printf("  %-21s %d\n", "Errors", result.Job.WorkerErrors)
 	fmt.Println()
@@ -243,6 +247,10 @@ func printStatusJSON(result statusservice.Result) error {
 		PublishedWork:     result.Job.PublishedWork,
 		WorkerProcessed:   result.Job.WorkerProcessed,
 		WorkerToCopy:      result.Job.WorkerToCopy,
+		WorkerCopyMissing: result.Job.WorkerCopyMissing,
+		WorkerCopySize:    result.Job.WorkerCopySize,
+		WorkerCopyMTime:   result.Job.WorkerCopyMTime,
+		WorkerCopyCTime:   result.Job.WorkerCopyCTime,
 		WorkerOK:          result.Job.WorkerOK,
 		WorkerErrors:      result.Job.WorkerErrors,
 		Errors:            result.Job.Errors,
@@ -365,6 +373,10 @@ type statusJSONOutput struct {
 	PublishedWork     uint64                    `json:"publishedWork"`
 	WorkerProcessed   uint64                    `json:"workerProcessed"`
 	WorkerToCopy      uint64                    `json:"workerToCopy"`
+	WorkerCopyMissing uint64                    `json:"workerCopyMissing"`
+	WorkerCopySize    uint64                    `json:"workerCopySize"`
+	WorkerCopyMTime   uint64                    `json:"workerCopyMtime"`
+	WorkerCopyCTime   uint64                    `json:"workerCopyCtime"`
 	WorkerOK          uint64                    `json:"workerOK"`
 	WorkerErrors      uint64                    `json:"workerErrors"`
 	Errors            uint64                    `json:"errors"`

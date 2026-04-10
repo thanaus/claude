@@ -75,6 +75,10 @@ func newWorkerRunE(svc workerservice.Service) func(*cobra.Command, []string) err
 		fmt.Println("Summary:")
 		fmt.Printf("  %-21s %d\n", "Processed", result.WorkerProcessed)
 		fmt.Printf("  %-21s %d\n", "To copy", result.WorkerToCopy)
+		fmt.Printf("  %-21s %d\n", "Missing", result.WorkerCopyMissing)
+		fmt.Printf("  %-21s %d\n", "Size mismatch", result.WorkerCopySize)
+		fmt.Printf("  %-21s %d\n", "MTime mismatch", result.WorkerCopyMTime)
+		fmt.Printf("  %-21s %d\n", "CTime newer src", result.WorkerCopyCTime)
 		fmt.Printf("  %-21s %d\n", "Already OK", result.WorkerOK)
 		fmt.Printf("  %-21s %d\n", "Errors", result.WorkerErrors)
 
