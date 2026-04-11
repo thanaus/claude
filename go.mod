@@ -4,8 +4,10 @@ go 1.26
 
 require (
 	github.com/google/uuid v1.6.0
+	github.com/mattn/go-isatty v0.0.20
 	github.com/nats-io/nats.go v1.50.0
 	github.com/pkg/xattr v0.4.12
+	github.com/pterm/pterm v0.12.83
 	github.com/spf13/cobra v1.10.2
 )
 

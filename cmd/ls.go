@@ -2,12 +2,15 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"sync"
 
+	"github.com/mattn/go-isatty"
 	"github.com/nexus/nexus/internal/app"
 	"github.com/nexus/nexus/internal/cli/validator"
 	"github.com/nexus/nexus/internal/config"
 	lsservice "github.com/nexus/nexus/internal/service/ls"
+	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
 )
 
@@ -52,7 +55,7 @@ func newLSRunE(svc lsservice.Service) func(*cobra.Command, []string) error {
 		natsCfg, _ := config.NATSConfigFromContext(cmd.Context())
 		workers, _ := cmd.Flags().GetInt("workers")
 		events := make(chan lsservice.Event, 16)
-		renderer := &lsCLIRenderer{}
+		renderer := &lsCLIRenderer{isTTY: isatty.IsTerminal(os.Stdout.Fd())}
 
 		var renderWG sync.WaitGroup
 		renderWG.Add(1)
@@ -94,7 +97,8 @@ func (s chanSink) Emit(event lsservice.Event) {
 }
 
 type lsCLIRenderer struct {
-	progressActive bool
+	progressArea *pterm.AreaPrinter
+	isTTY        bool
 }
 
 func (r *lsCLIRenderer) handle(event lsservice.Event) {
@@ -107,33 +111,40 @@ func (r *lsCLIRenderer) handle(event lsservice.Event) {
 }
 
 func (r *lsCLIRenderer) renderProgress(progress lsservice.Progress) {
-	if r.progressActive {
-		clearProgressBlock()
-	}
-
-	fmt.Println("Progress:")
-	fmt.Printf("  %-19s %d\n", "Discovered", progress.DiscoveredEntries)
-	fmt.Printf("  %-19s %d\n", "Published", progress.PublishedWork)
-	fmt.Printf("  %-19s %d\n", "Errors", progress.Errors)
-	r.progressActive = true
-}
-
-func (r *lsCLIRenderer) endProgress() {
-	if !r.progressActive {
+	if !r.isTTY {
 		return
 	}
 
-	clearProgressBlock()
-	r.progressActive = false
+	text := formatLSProgress(progress)
+
+	if r.progressArea == nil {
+		area, err := pterm.DefaultArea.WithRemoveWhenDone().Start(text)
+		if err != nil {
+			return
+		}
+		r.progressArea = area
+		return
+	}
+
+	r.progressArea.Update(text)
 }
 
-func clearProgressBlock() {
-	fmt.Print("\033[4A")
-	for range 4 {
-		fmt.Print("\033[2K")
-		fmt.Print("\033[1B")
+func (r *lsCLIRenderer) endProgress() {
+	if r.progressArea == nil {
+		return
 	}
-	fmt.Print("\033[4A")
+
+	_ = r.progressArea.Stop()
+	r.progressArea = nil
+}
+
+func formatLSProgress(progress lsservice.Progress) string {
+	return fmt.Sprintf(
+		"Progress:\n  %-19s %d\n  %-19s %d\n  %-19s %d\n",
+		"Discovered", progress.DiscoveredEntries,
+		"Published", progress.PublishedWork,
+		"Errors", progress.Errors,
+	)
 }
 
 func boolStatus(ok bool) string {
