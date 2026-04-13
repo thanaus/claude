@@ -46,9 +46,6 @@ Exemples :
 
 - `Args`: `sync` attend exactement `<source> <destination>` ;
 - `Args`: `ls`, `status` et `worker` attendent exactement `<token>` ;
-- `PreRunE`: `--output` doit être parmi les formats supportés ;
-- `PreRunE`: `--limit` doit être strictement positif.
-
 ---
 
 ## Alternatives considérées
@@ -95,7 +92,7 @@ Cette décision implique notamment :
 
 - l'usage de `Args` sur les commandes définies dans `cmd/`;
 - la suppression des validateurs `RequireArgs()` et `ValidateToken()` devenus redondants ;
-- la conservation des validateurs de flags dans `internal/validator`.
+- la conservation des validateurs métier pertinents dans `internal/validator`.
 
 ---
 

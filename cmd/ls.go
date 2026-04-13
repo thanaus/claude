@@ -35,15 +35,10 @@ Workers can then consume these messages to perform synchronization.`,
 		validator.ValidateNATSConfig(
 			fmt.Sprintf("Define a valid NATS configuration before running the listing workflow.\nCheck %s and, if set, %s.", app.NATSURLEnv, app.NATSProbeTimeoutEnv),
 		),
-		validator.ValidateOutputFormat(),
-		validator.ValidateLimit(),
 	)
 
 	lsCmd.PreRunE = v.PreRunE()
 	lsCmd.RunE = newLSRunE(svc)
-	lsCmd.Flags().StringP("output", "o", "table", "Output format: table, json")
-	lsCmd.Flags().StringP("filter", "f", "", "Filter resources by name (e.g. api, worker)")
-	lsCmd.Flags().IntP("limit", "l", 0, "Maximum number of results (0 = no limit)")
 	lsCmd.Flags().IntP("workers", "w", 4, "Number of scan workers")
 
 	return lsCmd

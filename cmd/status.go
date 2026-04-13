@@ -3,11 +3,9 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/nexus/nexus/internal/app"
-	"github.com/nexus/nexus/internal/cli/output"
 	"github.com/nexus/nexus/internal/cli/validator"
 	"github.com/nexus/nexus/internal/config"
 	"github.com/nexus/nexus/internal/monitoring"
@@ -25,8 +23,7 @@ func NewStatusCmd(svc statusservice.Service) *cobra.Command {
 		Long: "Display the health and operational status of services associated " +
 			"with an authentication token.",
 		Example: fmt.Sprintf(`  %s status my-service-token
-  %s status my-service-token --output json
-  %s status my-service-token --watch --verbose`, app.Name, app.Name, app.Name),
+  %s status my-service-token --watch --verbose`, app.Name, app.Name),
 		Args: exactArgs("", "<token>"),
 	}
 
@@ -34,12 +31,10 @@ func NewStatusCmd(svc statusservice.Service) *cobra.Command {
 		validator.ValidateNATSConfig(
 			fmt.Sprintf("Define a valid NATS configuration before reading the job status.\nCheck %s and, if set, %s.", app.NATSURLEnv, app.NATSProbeTimeoutEnv),
 		),
-		validator.ValidateOutputFormat(),
 	)
 
 	statusCmd.PreRunE = v.PreRunE()
 	statusCmd.RunE = newStatusRunE(svc)
-	statusCmd.Flags().StringP("output", "o", "table", "Output format: table, json")
 	statusCmd.Flags().Bool("watch", false, "Continuously refresh status")
 
 	return statusCmd
@@ -48,14 +43,12 @@ func NewStatusCmd(svc statusservice.Service) *cobra.Command {
 func newStatusRunE(svc statusservice.Service) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
 		token := args[0]
-		outputFmt, _ := cmd.Flags().GetString("output")
 		watch, _ := cmd.Flags().GetBool("watch")
 		verbose, _ := cmd.Flags().GetCount("verbose")
 		natsCfg, _ := config.NATSConfigFromContext(cmd.Context())
-		format := output.Format(outputFmt)
 
 		if verbose >= 1 {
-			fmt.Printf("[verbose:%d] token=%s output=%s watch=%v\n", verbose, token, outputFmt, watch)
+			fmt.Printf("[verbose:%d] token=%s watch=%v\n", verbose, token, watch)
 		}
 
 		if !watch {
@@ -64,21 +57,21 @@ func newStatusRunE(svc statusservice.Service) func(*cobra.Command, []string) err
 				return statusRuntimeError(natsCfg.URL, token, err)
 			}
 
-			return renderStatusResult(result, format)
+			return renderStatusResult(result)
 		}
 
-		return watchStatus(cmd, svc, token, format, natsCfg)
+		return watchStatus(cmd, svc, token, natsCfg)
 	}
 }
 
-func watchStatus(cmd *cobra.Command, svc statusservice.Service, token string, format output.Format, natsCfg config.NATSConfig) error {
+func watchStatus(cmd *cobra.Command, svc statusservice.Service, token string, natsCfg config.NATSConfig) error {
 	result, err := svc.Load(cmd.Context(), token, time.Now().UTC())
 	if err != nil {
 		return statusRuntimeError(natsCfg.URL, token, err)
 	}
 
 	if result.Job.MonitoringSubject == "" {
-		return pollStatus(cmd, svc, token, format, natsCfg)
+		return pollStatus(cmd, svc, token, natsCfg)
 	}
 
 	session, err := natsclient.OpenJetStream(cmd.Context(), natsCfg)
@@ -102,7 +95,7 @@ func watchStatus(cmd *cobra.Command, svc statusservice.Service, token string, fo
 		if !first {
 			clearStatusScreen()
 		}
-		if err := renderStatusResult(current, format); err != nil {
+		if err := renderStatusResult(current); err != nil {
 			return err
 		}
 		first = false
@@ -145,7 +138,7 @@ func watchStatus(cmd *cobra.Command, svc statusservice.Service, token string, fo
 	}
 }
 
-func pollStatus(cmd *cobra.Command, svc statusservice.Service, token string, format output.Format, natsCfg config.NATSConfig) error {
+func pollStatus(cmd *cobra.Command, svc statusservice.Service, token string, natsCfg config.NATSConfig) error {
 	ticker := time.NewTicker(monitoring.UpdateInterval)
 	defer ticker.Stop()
 
@@ -159,7 +152,7 @@ func pollStatus(cmd *cobra.Command, svc statusservice.Service, token string, for
 		if !first {
 			clearStatusScreen()
 		}
-		if err := renderStatusResult(result, format); err != nil {
+		if err := renderStatusResult(result); err != nil {
 			return err
 		}
 		first = false
@@ -172,14 +165,9 @@ func pollStatus(cmd *cobra.Command, svc statusservice.Service, token string, for
 	}
 }
 
-func renderStatusResult(result statusservice.Result, format output.Format) error {
-	switch format {
-	case output.FormatJSON:
-		return printStatusJSON(result)
-	default:
-		printStatusTable(result)
-		return nil
-	}
+func renderStatusResult(result statusservice.Result) error {
+	printStatusTable(result)
+	return nil
 }
 
 func printStatusTable(result statusservice.Result) {
@@ -228,54 +216,6 @@ func printStatusTable(result statusservice.Result) {
 	fmt.Printf("  %-21s %s\n", "Discovery rate", formatOptionalRate(result.Metrics.DiscoveryRate, result.Metrics.Elapsed > 0))
 	fmt.Printf("  %-21s %s\n", "Error rate", formatOptionalPercent(result.Metrics.ErrorRate, result.Job.DiscoveredEntries > 0))
 	fmt.Printf("  %-21s %s\n", "Published ratio", formatOptionalPercent(result.Metrics.PublishedPercent, result.Job.DiscoveredEntries > 0))
-}
-
-func printStatusJSON(result statusservice.Result) error {
-	payload := statusJSONOutput{
-		Token:          result.Job.Token,
-		State:          result.Job.State,
-		Source:         result.Job.Source,
-		Destination:    result.Job.Destination,
-		CreatedAt:      result.Job.CreatedAt,
-		StartedAt:      result.Job.StartedAt,
-		UpdatedAt:      result.Job.UpdatedAt,
-		Phase:          result.MonitoringPhase,
-		NATS:           result.URL,
-		JetStream:      result.JetStreamReady,
-		KeyValue:       result.KeyValue,
-		DiscoveredEntries: result.Job.DiscoveredEntries,
-		DiscoveredBytes:   result.Metrics.DiscoveredBytes,
-		PublishedWork:     result.Job.PublishedWork,
-		WorkerProcessed:   result.Job.WorkerProcessed,
-		WorkerToCopy:      result.Job.WorkerToCopy,
-		WorkerCopyMissing: result.Job.WorkerCopyMissing,
-		WorkerCopySize:    result.Job.WorkerCopySize,
-		WorkerCopyMTime:   result.Job.WorkerCopyMTime,
-		WorkerCopyCTime:   result.Job.WorkerCopyCTime,
-		WorkerOK:          result.Job.WorkerOK,
-		WorkerErrors:      result.Job.WorkerErrors,
-		WorkerLStatNanos:  result.Job.WorkerLStatNanos,
-		WorkerCopyNanos:   result.Job.WorkerCopyNanos,
-		Errors:            result.Job.Errors,
-		Metrics: statusJSONMetrics{
-			ElapsedSeconds:   optionalSeconds(result.Metrics.Elapsed, result.Job.StartedAt != nil),
-			IdleSeconds:      optionalSeconds(result.Metrics.Idle, result.Job.UpdatedAt != nil),
-			Backlog:          result.Metrics.Backlog,
-			PublishRate:      optionalFloat(result.Metrics.PublishRate, result.Metrics.Elapsed > 0),
-			DiscoveryRate:    optionalFloat(result.Metrics.DiscoveryRate, result.Metrics.Elapsed > 0),
-			WorkerRate:       optionalFloat(result.Metrics.WorkerRate, result.Metrics.Elapsed > 0),
-			WorkerInstantRate: optionalFloat(result.Metrics.WorkerInstantRate, result.Metrics.WorkerInstantRateAvailable),
-			WorkerLStatSeconds: optionalSeconds(time.Duration(result.Job.WorkerLStatNanos), true),
-			WorkerCopySeconds:  optionalSeconds(time.Duration(result.Job.WorkerCopyNanos), true),
-			ErrorRate:        optionalFloat(result.Metrics.ErrorRate, result.Job.DiscoveredEntries > 0),
-			PublishedPercent: optionalFloat(result.Metrics.PublishedPercent, result.Job.DiscoveredEntries > 0),
-		},
-		CollectedAt: result.CollectedAt,
-	}
-
-	encoder := json.NewEncoder(os.Stdout)
-	encoder.SetIndent("", "  ")
-	return encoder.Encode(payload)
 }
 
 func clearStatusScreen() {
@@ -335,72 +275,10 @@ func formatBytes(value uint64) string {
 	return fmt.Sprintf("%.2f %s", size, unit)
 }
 
-func optionalSeconds(value time.Duration, available bool) *float64 {
-	if !available {
-		return nil
-	}
-
-	seconds := value.Seconds()
-	return &seconds
-}
-
-func optionalFloat(value float64, available bool) *float64 {
-	if !available {
-		return nil
-	}
-
-	v := value
-	return &v
-}
-
 func statusRuntimeError(url, token string, err error) error {
 	return runtimeError(
 		fmt.Sprintf("Failed to load status for job %q: %s", token, url),
 		fmt.Sprintf("Ensure the NATS server is running, JetStream is enabled, and the job token %q exists in the KV bucket %q.\nCreate a job first with '%s sync <source> <destination>'.", token, "jobs", app.Name),
 		err,
 	)
-}
-
-type statusJSONOutput struct {
-	Token             string                    `json:"token"`
-	State             string                    `json:"state"`
-	Source            string                    `json:"source"`
-	Destination       string                    `json:"destination"`
-	CreatedAt         time.Time                 `json:"createdAt"`
-	StartedAt         *time.Time                `json:"startedAt,omitempty"`
-	UpdatedAt         *time.Time                `json:"updatedAt,omitempty"`
-	Phase             string                    `json:"phase,omitempty"`
-	NATS              string                    `json:"nats"`
-	JetStream         bool                      `json:"jetStream"`
-	KeyValue          natsclient.ResourceStatus `json:"keyValue"`
-	DiscoveredEntries uint64                    `json:"discoveredEntries"`
-	DiscoveredBytes   uint64                    `json:"discoveredBytes"`
-	PublishedWork     uint64                    `json:"publishedWork"`
-	WorkerProcessed   uint64                    `json:"workerProcessed"`
-	WorkerToCopy      uint64                    `json:"workerToCopy"`
-	WorkerCopyMissing uint64                    `json:"workerCopyMissing"`
-	WorkerCopySize    uint64                    `json:"workerCopySize"`
-	WorkerCopyMTime   uint64                    `json:"workerCopyMtime"`
-	WorkerCopyCTime   uint64                    `json:"workerCopyCtime"`
-	WorkerOK          uint64                    `json:"workerOK"`
-	WorkerErrors      uint64                    `json:"workerErrors"`
-	WorkerLStatNanos  uint64                    `json:"workerLstatNanos"`
-	WorkerCopyNanos   uint64                    `json:"workerCopyNanos"`
-	Errors            uint64                    `json:"errors"`
-	Metrics           statusJSONMetrics         `json:"metrics"`
-	CollectedAt       time.Time                 `json:"collectedAt"`
-}
-
-type statusJSONMetrics struct {
-	ElapsedSeconds    *float64 `json:"elapsedSeconds,omitempty"`
-	IdleSeconds       *float64 `json:"idleSeconds,omitempty"`
-	Backlog           uint64   `json:"backlog"`
-	PublishRate       *float64 `json:"publishRate,omitempty"`
-	DiscoveryRate     *float64 `json:"discoveryRate,omitempty"`
-	WorkerRate        *float64 `json:"workerRate,omitempty"`
-	WorkerInstantRate *float64 `json:"workerInstantRate,omitempty"`
-	WorkerLStatSeconds *float64 `json:"workerLstatSeconds,omitempty"`
-	WorkerCopySeconds  *float64 `json:"workerCopySeconds,omitempty"`
-	ErrorRate         *float64 `json:"errorRate,omitempty"`
-	PublishedPercent  *float64 `json:"publishedPercent,omitempty"`
 }

@@ -53,42 +53,6 @@ func (v *Validator) PreRunE() func(cmd *cobra.Command, args []string) error {
 
 // ---- Reusable rules -------------------------------------------------------
 
-// ValidateOutputFormat checks that --output holds a supported value.
-func ValidateOutputFormat() Rule {
-	return func(cmd *cobra.Command, args []string) *output.ValidationError {
-		if !cmd.Flags().Changed("output") {
-			return nil
-		}
-		val, _ := cmd.Flags().GetString("output")
-		f := output.Format(val)
-		if !f.IsValid() {
-			return &output.ValidationError{
-				Message: fmt.Sprintf("--output %q is not supported", val),
-				Hint: fmt.Sprintf("Accepted values: %s. Example: --output json",
-					strings.Join(output.ValidFormats, ", ")),
-			}
-		}
-		return nil
-	}
-}
-
-// ValidateLimit checks that --limit is a strictly positive integer.
-func ValidateLimit() Rule {
-	return func(cmd *cobra.Command, args []string) *output.ValidationError {
-		if !cmd.Flags().Changed("limit") {
-			return nil
-		}
-		val, _ := cmd.Flags().GetInt("limit")
-		if val <= 0 {
-			return &output.ValidationError{
-				Message: fmt.Sprintf("--limit must be a positive integer, got: %d", val),
-				Hint:    "Example: --limit 10",
-			}
-		}
-		return nil
-	}
-}
-
 // ValidateNATSConfig checks that the NATS configuration can be loaded.
 func ValidateNATSConfig(hint string) Rule {
 	return func(cmd *cobra.Command, args []string) *output.ValidationError {

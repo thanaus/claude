@@ -35,8 +35,6 @@ Multiple workers can run in parallel to scale processing.`,
 
 	workerCmd.PreRunE = v.PreRunE()
 	workerCmd.RunE = newWorkerRunE(svc)
-	workerCmd.Flags().String("env", "", "Target environment (e.g. production, staging)")
-	workerCmd.Flags().String("namespace", "", "Worker namespace (e.g. payments, auth)")
 	workerCmd.Flags().IntP("workers", "w", 4, "Number of worker comparison goroutines")
 
 	return workerCmd
@@ -45,14 +43,12 @@ Multiple workers can run in parallel to scale processing.`,
 func newWorkerRunE(svc workerservice.Service) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
 		token := args[0]
-		env, _ := cmd.Flags().GetString("env")
-		namespace, _ := cmd.Flags().GetString("namespace")
 		workers, _ := cmd.Flags().GetInt("workers")
 		verbose, _ := cmd.Flags().GetCount("verbose")
 		natsCfg, _ := config.NATSConfigFromContext(cmd.Context())
 
 		if verbose >= 1 {
-			fmt.Printf("[verbose:%d] token=%s env=%s namespace=%s\n", verbose, token, env, namespace)
+			fmt.Printf("[verbose:%d] token=%s\n", verbose, token)
 		}
 
 		result, err := svc.Run(cmd.Context(), workerservice.Input{

@@ -5,27 +5,6 @@ import (
 	"strings"
 )
 
-// Format represents the desired output format.
-type Format string
-
-const (
-	FormatTable Format = "table"
-	FormatJSON  Format = "json"
-)
-
-// ValidFormats lists the accepted output formats.
-var ValidFormats = []string{string(FormatTable), string(FormatJSON)}
-
-// IsValid reports whether the format is supported.
-func (f Format) IsValid() bool {
-	for _, v := range ValidFormats {
-		if string(f) == v {
-			return true
-		}
-	}
-	return false
-}
-
 // ValidationError represents a validation error with a message and an optional hint.
 type ValidationError struct {
 	Field   string
